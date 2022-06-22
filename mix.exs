@@ -28,11 +28,13 @@ defmodule SftpdS3.MixProject do
   defp deps do
     [
       {:configparser_ex, "~> 4.0"},
+      {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
       {:ex_aws_s3, "~> 2.0"},
       {:ex_aws, "~> 2.0"},
       {:hackney, "~> 1.9"},
       {:jason, "~> 1.3"},
-      {:sweet_xml, "~> 0.6.0"}
+      {:sweet_xml, "~> 0.6.0"},
+      {:timex, "~> 3.7.0"}
     ]
   end
 end
