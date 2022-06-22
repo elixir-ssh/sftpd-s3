@@ -12,7 +12,10 @@ defmodule SftpdS3.S3.OperationsTest do
     :ok
   end
 
-  test "blank" do
+  test "list empty dir" do
+    ExAws.S3.put_bucket("list-empty-dir", "us-east-1")
+    |> ExAws.request!()
+
     assert true
   end
 end
