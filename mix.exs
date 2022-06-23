@@ -20,7 +20,7 @@ defmodule SftpdS3.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :hackney]
+      extra_applications: [:logger, :hackney, :ssh]
     ]
   end
 
