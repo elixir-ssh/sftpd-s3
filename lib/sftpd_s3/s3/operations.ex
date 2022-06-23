@@ -162,7 +162,8 @@ defmodule SftpdS3.S3.Operations do
     end
   end
 
-  defp fake_directory_info do
+  @spec fake_directory_info :: tuple
+  def fake_directory_info do
     timestamp = Timex.now() |> Timex.to_erl()
 
     {:file_info, 640, :directory, :read, timestamp, timestamp, timestamp, 16877, 20, 16_777_230,
