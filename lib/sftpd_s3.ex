@@ -10,7 +10,7 @@ defmodule SftpdS3 do
 
   ## Examples
 
-      iex> {:ok, pid} = SftpdS3.start_server(65_530)
+      iex> {:ok, _pid} = SftpdS3.start_server(65_530)
   """
 
   def start_server(port \\ 22)
@@ -26,7 +26,11 @@ defmodule SftpdS3 do
          :ssh_sftpd.subsystem_spec(
            cwd: '/',
            root: '/',
-           file_handler: {SftpdS3.S3.FileHandler, %{}}
+           file_handler:
+            {
+              SftpdS3.S3.FileHandler,
+              %{bucket: Application.get_env(:sftpd_s3, :bucket)}
+            }
          )
        ]}
     ])

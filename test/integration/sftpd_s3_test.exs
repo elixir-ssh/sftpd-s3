@@ -12,13 +12,13 @@ defmodule SftpdS3Test do
   ]
 
   setup_all do
-    path =
+    local_path =
       Path.join([
         File.cwd!(),
         "test/fixtures/1mb.txt"
       ])
 
-    file = ExAws.S3.Upload.stream_file(path)
+    file = ExAws.S3.Upload.stream_file(local_path)
     bucket = Application.get_env(:sftpd_s3, :bucket)
 
     ExAws.S3.put_bucket(bucket, "us-west-2") |> ExAws.request()
@@ -30,7 +30,7 @@ defmodule SftpdS3Test do
     ExAws.S3.upload(file, bucket, "foldertest/11/assets2.csv")
     |> ExAws.request!()
 
-    %{bucket: bucket, path: path}
+    %{bucket: bucket, path: "foldertest/9/assets.csv" }
   end
 
   describe "SFTP Server" do
@@ -40,7 +40,7 @@ defmodule SftpdS3Test do
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, '/')
 
-      assert Enum.sort(listing) == Enum.sort(['foldertest'])
+      assert Enum.sort(listing) == Enum.sort(['.', '..', 'foldertest'])
 
       assert {:ok,
               {:file_info, _size, :directory, :read_write, time, time, time, _, _, _, _, _, _, _}} =
@@ -48,9 +48,9 @@ defmodule SftpdS3Test do
 
       assert {:ok,
               {:file_info, size, :regular, :read_write, time, time, time, _, _, _, _, _, _, _}} =
-               :ssh_sftp.read_file_info(channel_ref, '/foldertest/9/assets.csv')
+               :ssh_sftp.read_file_info(channel_ref, path |> to_charlist()) |> dbg()
 
-      assert {:ok, "0"} = :ssh_sftp.open(channel_ref, '/foldertest/9/assets.csv', [:read])
+      assert {:ok, "0"} = :ssh_sftp.open(channel_ref, path |> to_charlist(), [:read])
 
       assert {:ok, data} = :ssh_sftp.read(channel_ref, "0", size)
 

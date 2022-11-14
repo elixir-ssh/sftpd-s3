@@ -33,26 +33,26 @@ defmodule SftpdS3.S3.IODevice do
 
   @impl GenServer
   def handle_call({:position, {:bof, _offset}}, _from, %{path: path, bucket: bucket} = state) do
-    IO.inspect("Asked to rewind stream to beginning. Reopening instead.")
+    dbg("Asked to rewind stream to beginning. Reopening instead.")
 
     {:reply, {:ok, 0},
      Map.merge(state, %{position: 0, stream: Operations.read_stream(path, bucket)})}
   end
 
   def handle_call({:position, offset}, _from, state) do
-    IO.inspect(offset, label: "position")
+    dbg(offset, label: "position")
     {:reply, {:ok, offset}, state}
   end
 
   def handle_call({:read, length}, _from, %{size: size, position: pos} = state)
       when pos + length > size do
-    IO.inspect("Asked to read past end of file: #{pos} + #{length} > #{size}")
+    dbg("Asked to read past end of file: #{pos} + #{length} > #{size}")
     {:reply, {:error, :badarg}, state}
   end
 
   def handle_call({:read, _length}, _from, %{size: size, position: pos} = state)
       when pos >= size do
-    IO.inspect("pos: #{pos}, size: #{size}", label: "EOF")
+    dbg("EOF - pos: #{pos}, size: #{size}")
     {:reply, {:eof, 0}, state}
   end
 
@@ -63,7 +63,7 @@ defmodule SftpdS3.S3.IODevice do
       ) do
     ret = Enum.take(stream, length) |> Enum.join()
 
-    IO.inspect(ret, label: "read")
+    dbg(ret, label: "read")
 
     {:reply, {:ok, ret}, %{state | position: pos + String.length(ret), stream: stream}}
   end
@@ -75,12 +75,12 @@ defmodule SftpdS3.S3.IODevice do
 
   @impl GenServer
   def handle_info({:file_request, _, ref, :close}, state) do
-    IO.inspect(ref, label: "close")
+    dbg(ref, label: "close")
     {:stop, :normal, state}
   end
 
   def handle_info(message, state) do
-    IO.inspect(message, label: "handle_info")
+    dbg(message, label: "handle_info")
     {:noreply, state}
   end
 end
