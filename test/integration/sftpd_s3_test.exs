@@ -107,7 +107,7 @@ defmodule SftpdS3Test do
   end
 
   defp start_ssh_server do
-    assert {:ok, ref} = FileHandler.start_server(@port)
+    assert {:ok, ref} = SftpdS3.start_server(@port)
 
     on_exit(fn ->
       :ssh.stop_daemon(ref)
