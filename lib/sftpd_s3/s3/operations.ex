@@ -98,7 +98,7 @@ defmodule SftpdS3.S3.Operations do
       {:ok, %{headers: headers}} ->
         mtime =
           headers
-          |> List.keyfind("last-modified", 0)
+          |> List.keyfind("Last-Modified", 0)
           |> then(fn
             nil -> NaiveDateTime.utc_now() |> NaiveDateTime.to_erl()
             {_, lm} -> get_erl_time_from_rfc1123(lm)
@@ -106,7 +106,7 @@ defmodule SftpdS3.S3.Operations do
 
         size =
           headers
-          |> List.keyfind("content-length", 0)
+          |> List.keyfind("Content-Length", 0)
           |> then(fn
             nil -> 0
             {_, length} -> String.to_integer(length)
