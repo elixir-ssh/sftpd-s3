@@ -23,9 +23,9 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def del_dir(path, state) do
-    dbg(path, laabel: "del_dir")
-    {Operations.del_dir(path), state}
+  def del_dir(path, %{bucket: bucket} = state) do
+    dbg(path, label: "del_dir")
+    {Operations.del_dir(path, bucket), state}
   end
 
   @impl true
@@ -40,10 +40,10 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def is_dir(path, state) do
+  def is_dir(path,  %{bucket: bucket} = state) do
     dbg(path, label: "is_dir")
 
-    case Operations.read_link_info(path) do
+    case Operations.read_link_info(path, bucket) do
       {:ok, {:file_info, _, :directory, _, _, _, _, _, _, _, _, _, _, _}} ->
         {true, state}
 
@@ -53,17 +53,17 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def list_dir(abs_path, state) do
+  def list_dir(abs_path,  %{bucket: bucket} = state) do
     dbg(abs_path, label: "list_dir")
-    dir_listing = Operations.list_dir(abs_path)
+    dir_listing = Operations.list_dir(abs_path, bucket)
     {{:ok, dir_listing}, state}
   end
 
   @impl true
 
-  def make_dir(path, state) do
+  def make_dir(path,  %{bucket: bucket} = state) do
     dbg(path, label: "make_dir")
-    {Operations.make_dir(path), state}
+    {Operations.make_dir(path, bucket), state}
   end
 
   @impl true
@@ -74,8 +74,10 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
+
   def read_link(path, state) do
-    Logger.debug("read_link: #{path}")
+    Logger.debug("Symlinks not supported. read_link: #{path}")
+
     {{:error, :einval}, state}
   end
 
@@ -85,20 +87,20 @@ defmodule SftpdS3.S3.FileHandler do
     {{:ok, Operations.fake_directory_info()}, state}
   end
 
-  def read_link_info(path, state) do
+  def read_link_info(path,  %{bucket: bucket} = state) do
     dbg(path, label: "read_link_info from S3")
-    {Operations.read_link_info(path), state}
+    {Operations.read_link_info(path, bucket),  state}
   end
 
   @impl true
-  def open(path, [:binary, :read], state) do
+  def open(path, [:binary, :read], %{bucket: bucket} = state) do
     dbg(path, label: "open for read")
-    {IODevice.start_link(%{path: path}), state}
+    {IODevice.start_link(%{path: path, bucket: bucket}), state}
   end
 
-  def open(path, [:binary, :write], state) do
+  def open(path, [:binary, :write], %{bucket: bucket} = state) do
     dbg(path, label: "open for write")
-    {IODevice.start_link(%{path: path}), state}
+    {IODevice.start_link(%{path: path, bucket: bucket}), state}
   end
 
   def open(path, modes, state) do
@@ -123,9 +125,9 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def read_file_info(path, state) do
+  def read_file_info(path,  %{bucket: bucket} = state) do
     dbg(path, label: "read_file_info")
-    {Operations.read_link_info(path), state}
+    {Operations.read_link_info(path, bucket), state}
   end
 
   @impl true
