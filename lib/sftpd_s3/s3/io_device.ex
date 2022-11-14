@@ -63,9 +63,7 @@ defmodule SftpdS3.S3.IODevice do
       ) do
     ret = Enum.take(stream, length) |> Enum.join()
 
-    dbg(ret, label: "read")
-
-    {:reply, {:ok, ret}, %{state | position: pos + String.length(ret), stream: stream}}
+    {:reply, {:ok, ret}, %{state | position: pos + byte_size(ret), stream: stream}}
   end
 
   def handle_call({:write, data}, from, %{path: path, part: part, bucket: bucket} = state) do
