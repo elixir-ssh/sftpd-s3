@@ -18,10 +18,11 @@ defmodule SftpdS3Test do
         "test/fixtures/1mb.txt"
       ])
 
-    File.write!(path, :crypto.strong_rand_bytes(10_000_000))
-
     file = ExAws.S3.Upload.stream_file(path)
-    bucket = Application.get_env(:dispatch, :upload_bucket_name)
+    bucket = Application.get_env(:sftpd_s3, :bucket)
+
+    ExAws.S3.put_bucket(bucket, "us-west-2") |> ExAws.request()
+
     ExAws.S3.upload(file, bucket, "foldertest/9/assets.csv") |> ExAws.request!()
     ExAws.S3.upload(file, bucket, "foldertest/10/assets.csv") |> ExAws.request!()
     ExAws.S3.upload(file, bucket, "foldertest/11/assets.csv") |> ExAws.request!()
