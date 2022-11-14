@@ -66,7 +66,7 @@ defmodule SftpdS3Test do
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, '/')
 
-      assert Enum.sort(listing) == Enum.sort(['foldertest'])
+      assert Enum.sort(listing) == Enum.sort(['.', '..', 'foldertest'])
 
       assert {:ok, "0"} = :ssh_sftp.opendir(channel_ref, '/foldertest')
 
@@ -84,7 +84,7 @@ defmodule SftpdS3Test do
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, '/')
 
-      assert Enum.sort(listing) == Enum.sort(['foldertest'])
+      assert Enum.sort(listing) == Enum.sort(['.', '..', 'foldertest'])
 
       assert {:ok, "0"} = :ssh_sftp.open(channel_ref, '/foldertest/15/assets.csv', [:write])
 
