@@ -30,11 +30,11 @@ defmodule SftpdS3Test do
     ExAws.S3.upload(file, bucket, "foldertest/11/assets2.csv")
     |> ExAws.request!()
 
-    %{bucket: bucket, path: "foldertest/9/assets.csv" }
+    %{bucket: bucket, path: "foldertest/9/assets.csv", local_path: local_path}
   end
 
   describe "SFTP Server" do
-    test "happy path for read", %{path: path} do
+    test "happy path for read", %{path: path, local_path: local_path} do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
@@ -54,11 +54,7 @@ defmodule SftpdS3Test do
 
       assert {:ok, data} = :ssh_sftp.read(channel_ref, "0", size)
 
-      # TODO: there is an encoding and a crlf issue here
-      expected =
-        "ï»¿V,2.0.4\r\nH,Assets,2020-10-02T04:11:54-05:00\r\nC,Unique Borrower Identifier,Asset Type,Amount\r\nT,0"
-
-      assert expected == data |> to_string()
+      assert File.read!(local_path) == data |> Enum.into(<<>>, fn byte -> <<byte :: 8>> end)
 
       assert :ok = :ssh_sftp.close(channel_ref, "0")
 
