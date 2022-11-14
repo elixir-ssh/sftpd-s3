@@ -26,7 +26,7 @@ defmodule SftpdS3 do
          :ssh_sftpd.subsystem_spec(
            cwd: '/',
            root: '/',
-           file_handler: {__MODULE__, %{}}
+           file_handler: {SftpdS3.S3.FileHandler, %{}}
          )
        ]}
     ])

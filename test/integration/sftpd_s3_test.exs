@@ -61,6 +61,7 @@ defmodule SftpdS3Test do
       assert expected == data |> to_string()
 
       assert :ok = :ssh_sftp.close(channel_ref, "0")
+
     end
 
     test "happy path for make and delete directory", %{path: _path} do
@@ -107,12 +108,12 @@ defmodule SftpdS3Test do
   end
 
   defp start_ssh_server do
-    assert {:ok, ref} = SftpdS3.start_server(@port)
-
-    on_exit(fn ->
-      :ssh.stop_daemon(ref)
-    end)
-
-    {:ok, ref}
+    case SftpdS3.start_server(@port) do
+      {:ok, ref} ->     on_exit(fn ->
+        :ssh.stop_daemon(ref)
+      end)
+      {:ok, ref}
+      {:error, :eaddrinuse} -> :ok
+    end
   end
 end
