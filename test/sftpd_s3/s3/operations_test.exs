@@ -1,7 +1,7 @@
 defmodule SftpdS3.S3.OperationsTest do
   use ExUnit.Case, async: true
 
-  doctest SftpdS3
+  doctest SftpdS3.S3.Operations
 
   alias SftpdS3.S3.Operations
 
