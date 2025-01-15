@@ -33,8 +33,7 @@ defmodule SftpdS3.MixProject do
       {:ex_aws, "~> 2.0"},
       {:hackney, "~> 1.9"},
       {:jason, "~> 1.3"},
-      {:sweet_xml, "~> 0.6.0"},
-      {:timex, "~> 3.7.0"}
+      {:sweet_xml, "~> 0.6.0"}
     ]
   end
 end

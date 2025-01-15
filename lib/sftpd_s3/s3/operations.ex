@@ -164,15 +164,78 @@ defmodule SftpdS3.S3.Operations do
 
   @spec fake_directory_info :: tuple
   def fake_directory_info do
-    timestamp = Timex.now() |> Timex.to_erl()
+    timestamp = NaiveDateTime.utc_now() |> NaiveDateTime.to_erl()
 
     {:file_info, 640, :directory, :read, timestamp, timestamp, timestamp, 16877, 20, 16_777_230,
      0, 2, 1, 1}
   end
 
   defp get_erl_time_from_rfc1123(date_string) do
-    date_string
-    |> Timex.parse!("{RFC1123}")
-    |> Timex.to_erl()
+    case DateTime.from_iso8601(date_string) do
+      {:ok, datetime, _} ->
+        datetime |> DateTime.to_naive() |> NaiveDateTime.to_erl()
+
+      {:error, _} ->
+        case parse_rfc1123(date_string) do
+          {:ok, datetime} ->
+            datetime |> NaiveDateTime.to_erl()
+
+          {:error, _} ->
+            NaiveDateTime.utc_now() |> NaiveDateTime.to_erl()
+        end
+    end
+  end
+
+  defp parse_rfc1123(date_string) do
+    case NaiveDateTime.from_iso8601(date_string) do
+      {:ok, naive_datetime} ->
+        {:ok, naive_datetime}
+
+      {:error, _} ->
+        case parse_rfc1123_fallback(date_string) do
+          {:ok, naive_datetime} -> {:ok, naive_datetime}
+          {:error, _} -> {:error, :invalid_format}
+        end
+    end
+  end
+
+  defp parse_rfc1123_fallback(date_string) do
+    with {:ok, [day_name, day, month, year, time, "GMT"]} <-
+           Regex.run(~r/(\w+), (\d+) (\w+) (\d+) (\d+:\d+:\d+) GMT/, date_string),
+         {:ok, naive_datetime} <- parse_naive_datetime(day, month, year, time) do
+      {:ok, naive_datetime}
+    else
+      _ -> {:error, :invalid_format}
+    end
+  end
+
+  defp parse_naive_datetime(day, month, year, time) do
+    month_number =
+      %{
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12
+      }[month]
+
+    case NaiveDateTime.from_erl(
+           {{String.to_integer(year), month_number, String.to_integer(day)}, parse_time(time)}
+         ) do
+      {:ok, naive_datetime} -> {:ok, naive_datetime}
+      {:error, _} -> {:error, :invalid_format}
+    end
+  end
+
+  defp parse_time(time) do
+    [hour, minute, second] = String.split(time, ":") |> Enum.map(&String.to_integer/1)
+    {hour, minute, second}
   end
 end
