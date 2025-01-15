@@ -38,7 +38,7 @@ defmodule SftpdS3.S3.Operations do
   end
 
   @spec list_dir(charlist, String.t() | nil) :: any
-  def list_dir(path, bucket) when path in ['/', '/.'] do
+  def list_dir(path, bucket) when path in [~c"/", ~c"/."] do
     req = ExAws.S3.list_objects_v2(bucket)
 
     case ExAws.request(req) do
@@ -49,7 +49,7 @@ defmodule SftpdS3.S3.Operations do
           Path.split(key) |> List.first() |> to_charlist()
         end)
         |> Enum.uniq()
-        |> Enum.concat(['.', '..'])
+        |> Enum.concat([~c".", ~c".."])
 
       {:error, err} ->
         err
@@ -77,7 +77,7 @@ defmodule SftpdS3.S3.Operations do
           |> to_charlist()
         end)
         |> Enum.uniq()
-        |> Enum.concat(['.', '..'])
+        |> Enum.concat([~c".", ~c".."])
 
       {:error, err} ->
         err
@@ -87,7 +87,7 @@ defmodule SftpdS3.S3.Operations do
   @spec read_link_info(charlist, String.t()) ::
           {:ok, tuple}
 
-  def read_link_info(path, _bucket) when path in ['/', '/.', '..', '.'] do
+  def read_link_info(path, _bucket) when path in [~c"/", ~c"/.", ~c"..", ~c"."] do
     {:ok, fake_directory_info()}
   end
 

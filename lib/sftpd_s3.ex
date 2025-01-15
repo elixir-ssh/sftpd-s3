@@ -19,23 +19,21 @@ defmodule SftpdS3 do
   def start_server(port) do
     :ssh.daemon(port, [
       {:max_sessions, 1},
-      {:user_passwords, [{'user', 'password'}]},
-      {:system_dir, 'test/fixtures/ssh_keys'},
+      {:user_passwords, [{~c"user", ~c"password"}]},
+      {:system_dir, ~c"test/fixtures/ssh_keys"},
       {:subsystems,
        [
          :ssh_sftpd.subsystem_spec(
-           cwd: '/',
-           root: '/',
-           file_handler:
-            {
-              SftpdS3.S3.FileHandler,
-              %{bucket: Application.get_env(:sftpd_s3, :bucket)}
-            }
+           cwd: ~c"/",
+           root: ~c"/",
+           file_handler: {
+             SftpdS3.S3.FileHandler,
+             %{bucket: Application.get_env(:sftpd_s3, :bucket)}
+           }
          )
        ]}
     ])
   end
-
 
   @doc """
     Stop a SSH daemon.
@@ -51,5 +49,4 @@ defmodule SftpdS3 do
   def stop_server(pid) do
     :ssh.stop_daemon(pid)
   end
-
 end
