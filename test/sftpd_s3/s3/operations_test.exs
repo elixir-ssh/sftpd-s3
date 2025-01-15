@@ -63,9 +63,8 @@ defmodule SftpdS3.S3.OperationsTest do
     test "read_link_info /file", %{bucket: bucket} do
       ExAws.S3.put_object(bucket, "file", "some text") |> ExAws.request!()
 
-      # TODO: size should be 9
       assert {:ok,
-              {:file_info, 0, :regular, :read_write, time, time, time, 33261, 1, 0, 0, _, 1, 1}} =
+              {:file_info, 9, :regular, :read_write, time, time, time, 33261, 1, 0, 0, _, 1, 1}} =
                Operations.read_link_info(~c"/file", bucket)
     end
   end

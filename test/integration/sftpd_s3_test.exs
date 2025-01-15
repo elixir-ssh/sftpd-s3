@@ -3,7 +3,7 @@ defmodule SftpdS3Test do
 
   doctest SftpdS3
 
-  @port 31337
+  @port 1337
 
   @client_opts [
     silently_accept_hosts: true,
