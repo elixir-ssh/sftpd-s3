@@ -10,7 +10,7 @@ defmodule SftpdS3 do
 
   ## Examples
 
-      iex> {:ok, _pid} = SftpdS3.start_server(65_530)
+      iex> {:ok, _pid} = SftpdS3.start_server(:rand.uniform(65_535))
   """
 
   def start_server(port \\ 22)
@@ -43,7 +43,7 @@ defmodule SftpdS3 do
 
     ## Examples
 
-        iex> {:ok, pid} = SftpdS3.start_server(65_529)
+        iex> {:ok, pid} = SftpdS3.start_server(:rand.uniform(65_535))
         iex> SftpdS3.stop_server(pid)
   """
   def stop_server(pid) do
