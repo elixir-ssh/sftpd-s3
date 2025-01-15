@@ -200,7 +200,7 @@ defmodule SftpdS3.S3.Operations do
   end
 
   defp parse_rfc1123_fallback(date_string) do
-    with {:ok, [day_name, day, month, year, time, "GMT"]} <-
+    with {:ok, [_day_name, day, month, year, time, "GMT"]} <-
            Regex.run(~r/(\w+), (\d+) (\w+) (\d+) (\d+:\d+:\d+) GMT/, date_string),
          {:ok, naive_datetime} <- parse_naive_datetime(day, month, year, time) do
       {:ok, naive_datetime}
