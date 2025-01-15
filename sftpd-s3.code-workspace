@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"cSpell.words": [
+			"ERL_AFLAGS",
+			"fetchurl",
+			"inotify",
+			"libnotify",
+			"nixpkgs",
+			"numtide",
+			"pkgs",
+			"rebar",
+			"stdenv"
+		]
+	}
+}
