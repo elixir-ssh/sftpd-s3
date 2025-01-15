@@ -25,19 +25,19 @@ defmodule SftpdS3.S3.OperationsTest do
     end
 
     test "list_dir", %{bucket: bucket} do
-      assert ['.', '..'] = Operations.list_dir("/", bucket)
+      assert [~c".", ~c".."] = Operations.list_dir("/", bucket)
     end
 
     test "make_dir", %{bucket: bucket} do
-      assert ['.', '..'] = Operations.list_dir('/', bucket)
-      assert :ok = Operations.make_dir('/make_dir', bucket)
-      assert ['make_dir', '.', '..'] = Operations.list_dir('/', bucket)
+      assert [~c".", ~c".."] = Operations.list_dir(~c"/", bucket)
+      assert :ok = Operations.make_dir(~c"/make_dir", bucket)
+      assert [~c"make_dir", ~c".", ~c".."] = Operations.list_dir(~c"/", bucket)
     end
 
     test "read_link_info /", %{bucket: bucket} do
       assert {:ok,
               {:file_info, 640, :directory, :read, time, time, time, 16877, 20, 16_777_230, 0, 2,
-               1, 1}} = Operations.read_link_info('/', bucket)
+               1, 1}} = Operations.read_link_info(~c"/", bucket)
     end
   end
 
@@ -66,7 +66,7 @@ defmodule SftpdS3.S3.OperationsTest do
       # TODO: size should be 9
       assert {:ok,
               {:file_info, 0, :regular, :read_write, time, time, time, 33261, 1, 0, 0, _, 1, 1}} =
-               Operations.read_link_info('/file', bucket)
+               Operations.read_link_info(~c"/file", bucket)
     end
   end
 end

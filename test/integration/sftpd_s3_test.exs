@@ -7,8 +7,8 @@ defmodule SftpdS3Test do
 
   @client_opts [
     silently_accept_hosts: true,
-    user: 'user',
-    password: 'password'
+    user: ~c"user",
+    password: ~c"password"
   ]
 
   setup_all do
@@ -38,13 +38,13 @@ defmodule SftpdS3Test do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
-      assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, '/')
+      assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
 
-      assert Enum.sort(listing) == Enum.sort(['.', '..', 'foldertest'])
+      assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
 
       assert {:ok,
               {:file_info, _size, :directory, :read_write, time, time, time, _, _, _, _, _, _, _}} =
-               :ssh_sftp.read_file_info(channel_ref, '/foldertest')
+               :ssh_sftp.read_file_info(channel_ref, ~c"/foldertest")
 
       assert {:ok,
               {:file_info, size, :regular, :read_write, time, time, time, _, _, _, _, _, _, _}} =
@@ -54,39 +54,38 @@ defmodule SftpdS3Test do
 
       assert {:ok, data} = :ssh_sftp.read(channel_ref, "0", size)
 
-      assert File.read!(local_path) == data |> Enum.into(<<>>, fn byte -> <<byte :: 8>> end)
+      assert File.read!(local_path) == data |> Enum.into(<<>>, fn byte -> <<byte::8>> end)
 
       assert :ok = :ssh_sftp.close(channel_ref, "0")
-
     end
 
     test "happy path for make and delete directory", %{path: _path} do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
-      assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, '/')
+      assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
 
-      assert Enum.sort(listing) == Enum.sort(['.', '..', 'foldertest'])
+      assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
 
-      assert {:ok, "0"} = :ssh_sftp.opendir(channel_ref, '/foldertest')
+      assert {:ok, "0"} = :ssh_sftp.opendir(channel_ref, ~c"/foldertest")
 
-      assert :ok = :ssh_sftp.make_dir(channel_ref, '/foldertest/15')
+      assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/foldertest/15")
 
-      assert {:ok, ['..', '.', '9', '15', '11', '10']} =
-               :ssh_sftp.list_dir(channel_ref, '/foldertest')
+      assert {:ok, [~c"..", ~c".", ~c"9", ~c"15", ~c"11", ~c"10"]} =
+               :ssh_sftp.list_dir(channel_ref, ~c"/foldertest")
 
-      assert :ok = :ssh_sftp.del_dir(channel_ref, '/foldertest/15')
+      assert :ok = :ssh_sftp.del_dir(channel_ref, ~c"/foldertest/15")
     end
 
     test "happy path for upload without cd", %{path: _path} do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
-      assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, '/')
+      assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
 
-      assert Enum.sort(listing) == Enum.sort(['.', '..', 'foldertest'])
+      assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
 
-      assert {:ok, "0"} = :ssh_sftp.open(channel_ref, '/foldertest/15/assets.csv', [:write])
+      assert {:ok, "0"} = :ssh_sftp.open(channel_ref, ~c"/foldertest/15/assets.csv", [:write])
 
       assert false = :ssh_sftp.write(channel_ref, "0", "hello")
     end
@@ -105,11 +104,15 @@ defmodule SftpdS3Test do
 
   defp start_ssh_server do
     case SftpdS3.start_server(@port) do
-      {:ok, ref} ->     on_exit(fn ->
-        :ssh.stop_daemon(ref)
-      end)
-      {:ok, ref}
-      {:error, :eaddrinuse} -> :ok
+      {:ok, ref} ->
+        on_exit(fn ->
+          :ssh.stop_daemon(ref)
+        end)
+
+        {:ok, ref}
+
+      {:error, :eaddrinuse} ->
+        :ok
     end
   end
 end

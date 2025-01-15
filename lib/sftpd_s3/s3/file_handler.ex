@@ -36,11 +36,11 @@ defmodule SftpdS3.S3.FileHandler do
 
   def get_cwd(state) do
     dbg(state, label: "get_cwd")
-    {{:ok, '/'}, Map.merge(state, %{cwd: '/'})}
+    {{:ok, ~c"/"}, Map.merge(state, %{cwd: ~c"/"})}
   end
 
   @impl true
-  def is_dir(path,  %{bucket: bucket} = state) do
+  def is_dir(path, %{bucket: bucket} = state) do
     dbg(path, label: "is_dir")
 
     case Operations.read_link_info(path, bucket) do
@@ -53,7 +53,7 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def list_dir(abs_path,  %{bucket: bucket} = state) do
+  def list_dir(abs_path, %{bucket: bucket} = state) do
     dbg(abs_path, label: "list_dir")
     dir_listing = Operations.list_dir(abs_path, bucket)
     {{:ok, dir_listing}, state}
@@ -61,7 +61,7 @@ defmodule SftpdS3.S3.FileHandler do
 
   @impl true
 
-  def make_dir(path,  %{bucket: bucket} = state) do
+  def make_dir(path, %{bucket: bucket} = state) do
     dbg(path, label: "make_dir")
     {Operations.make_dir(path, bucket), state}
   end
@@ -82,14 +82,14 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def read_link_info(path, state) when path in ['/.', '..', '.'] do
+  def read_link_info(path, state) when path in [~c"/.", ~c"..", ~c"."] do
     dbg(path, label: "read_link_info")
     {{:ok, Operations.fake_directory_info()}, state}
   end
 
-  def read_link_info(path,  %{bucket: bucket} = state) do
+  def read_link_info(path, %{bucket: bucket} = state) do
     dbg(path, label: "read_link_info from S3")
-    {Operations.read_link_info(path, bucket),  state}
+    {Operations.read_link_info(path, bucket), state}
   end
 
   @impl true
@@ -125,7 +125,7 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def read_file_info(path,  %{bucket: bucket} = state) do
+  def read_file_info(path, %{bucket: bucket} = state) do
     dbg(path, label: "read_file_info")
     {Operations.read_link_info(path, bucket), state}
   end
