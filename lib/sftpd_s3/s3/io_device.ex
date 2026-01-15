@@ -67,32 +67,27 @@ defmodule SftpdS3.S3.IODevice do
          }}
 
       {:error, err} ->
-        IO.inspect(err, label: "Failed to initiate multipart upload")
+        Logger.error("Failed to initiate multipart upload: #{inspect(err)}")
         {:stop, {:error, :einval}, %{path: path, bucket: bucket, mode: :write}}
     end
   end
 
   @impl GenServer
   def handle_call({:position, {:bof, _offset}}, _from, %{mode: :read, path: path, bucket: bucket} = state) do
-    dbg("Asked to rewind stream to beginning. Reopening instead.")
-
     {:reply, {:ok, 0},
      Map.merge(state, %{position: 0, stream: Operations.read_stream(path, bucket)})}
   end
 
   def handle_call({:position, {:bof, _offset}}, _from, %{mode: :write} = state) do
-    # In write mode, position is not meaningful but we accept it
     {:reply, {:ok, 0}, state}
   end
 
   def handle_call({:position, offset}, _from, state) do
-    dbg(offset, label: "position")
     {:reply, {:ok, offset}, state}
   end
 
   def handle_call({:read, _length}, _from, %{size: size, position: pos} = state)
       when pos >= size do
-    dbg("EOF - pos: #{pos}, size: #{size}")
     {:reply, :eof, state}
   end
 
@@ -131,19 +126,16 @@ defmodule SftpdS3.S3.IODevice do
         {:reply, :ok, %{state | part: part + 1, parts: new_parts}}
 
       {:error, err} ->
-        IO.inspect(err, label: "write failed")
+        Logger.error("Write failed: #{inspect(err)}")
         {:reply, {:error, :einval}, state}
     end
   end
 
   @impl GenServer
   def handle_info(
-        {:file_request, _, ref, :close},
+        {:file_request, _, _ref, :close},
         %{mode: :write, path: path, bucket: bucket, upload_id: upload_id, parts: parts} = state
       ) do
-    dbg(ref, label: "close (write mode)")
-
-    # Complete the multipart upload
     key = path |> to_string()
     req = ExAws.S3.complete_multipart_upload(bucket, key, upload_id, parts)
 
@@ -152,26 +144,22 @@ defmodule SftpdS3.S3.IODevice do
         {:stop, :normal, state}
 
       {:error, err} ->
-        IO.inspect(err, label: "Failed to complete multipart upload")
-        # Abort the upload
+        Logger.error("Failed to complete multipart upload: #{inspect(err)}")
         ExAws.S3.abort_multipart_upload(bucket, key, upload_id) |> ExAws.request()
         {:stop, {:error, :einval}, state}
     end
   end
 
-  def handle_info({:file_request, _, ref, :close}, state) do
-    dbg(ref, label: "close")
+  def handle_info({:file_request, _, _ref, :close}, state) do
     {:stop, :normal, state}
   end
 
-  def handle_info(message, state) do
-    dbg(message, label: "handle_info")
+  def handle_info(_message, state) do
     {:noreply, state}
   end
 
   @impl GenServer
   def terminate(_reason, %{mode: :write, path: path, bucket: bucket, upload_id: upload_id, parts: parts}) do
-    # Complete the multipart upload on termination
     key = path |> to_string()
     req = ExAws.S3.complete_multipart_upload(bucket, key, upload_id, parts)
 
@@ -180,8 +168,7 @@ defmodule SftpdS3.S3.IODevice do
         :ok
 
       {:error, err} ->
-        IO.inspect(err, label: "Failed to complete multipart upload during terminate")
-        # Abort the upload
+        Logger.warning("Failed to complete multipart upload during terminate: #{inspect(err)}")
         ExAws.S3.abort_multipart_upload(bucket, key, upload_id) |> ExAws.request()
         :ok
     end

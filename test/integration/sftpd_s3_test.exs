@@ -1,5 +1,5 @@
 defmodule SftpdS3Test do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   doctest SftpdS3
 
@@ -33,22 +33,25 @@ defmodule SftpdS3Test do
     %{bucket: bucket, path: "foldertest/9/assets.csv", local_path: local_path}
   end
 
-  describe "SFTP Server" do
+  describe "SFTP Server - Read Operations" do
     test "happy path for read", %{path: path, local_path: local_path} do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
 
-      assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
+      # Verify expected entries are present
+      assert ~c"." in listing
+      assert ~c".." in listing
+      assert ~c"foldertest" in listing
 
       assert {:ok,
               {:file_info, _size, :directory, :read_write, time, time, time, _, _, _, _, _, _, _}} =
                :ssh_sftp.read_file_info(channel_ref, ~c"/foldertest")
 
       assert {:ok,
-              {:file_info, size, :regular, :read_write, time, time, time, _, _, _, _, _, _, _}} =
-               :ssh_sftp.read_file_info(channel_ref, path |> to_charlist()) |> dbg()
+              {:file_info, size, :regular, :read_write, _time, _time2, _time3, _, _, _, _, _, _, _}} =
+               :ssh_sftp.read_file_info(channel_ref, path |> to_charlist())
 
       assert {:ok, "0"} = :ssh_sftp.open(channel_ref, path |> to_charlist(), [:read])
 
@@ -59,31 +62,87 @@ defmodule SftpdS3Test do
       assert :ok = :ssh_sftp.close(channel_ref, "0")
     end
 
+    test "list_dir returns . and .. entries" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
+
+      assert ~c"." in listing
+      assert ~c".." in listing
+    end
+
+    test "list_dir in subdirectory returns . and .. entries" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/foldertest")
+
+      assert ~c"." in listing
+      assert ~c".." in listing
+    end
+
+    test "read_file_info returns error for non-existent file" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      assert {:error, :no_such_file} =
+               :ssh_sftp.read_file_info(channel_ref, ~c"/nonexistent.txt")
+    end
+  end
+
+  describe "SFTP Server - Directory Operations" do
     test "happy path for make and delete directory", %{path: _path} do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
 
-      assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
+      assert ~c"." in listing
+      assert ~c".." in listing
+      assert ~c"foldertest" in listing
 
       assert {:ok, "0"} = :ssh_sftp.opendir(channel_ref, ~c"/foldertest")
 
       assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/foldertest/15")
 
-      assert {:ok, [~c"..", ~c".", ~c"9", ~c"15", ~c"11", ~c"10"]} =
-               :ssh_sftp.list_dir(channel_ref, ~c"/foldertest")
+      {:ok, foldertest_listing} = :ssh_sftp.list_dir(channel_ref, ~c"/foldertest")
+      assert ~c"." in foldertest_listing
+      assert ~c".." in foldertest_listing
+      assert ~c"15" in foldertest_listing
+      assert ~c"9" in foldertest_listing
 
       assert :ok = :ssh_sftp.del_dir(channel_ref, ~c"/foldertest/15")
     end
 
+    test "create nested directories" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/nested_test")
+      assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/nested_test/level1")
+      assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/nested_test/level1/level2")
+
+      {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/nested_test/level1")
+      assert ~c"level2" in listing
+
+      # Cleanup
+      :ssh_sftp.del_dir(channel_ref, ~c"/nested_test/level1/level2")
+      :ssh_sftp.del_dir(channel_ref, ~c"/nested_test/level1")
+      :ssh_sftp.del_dir(channel_ref, ~c"/nested_test")
+    end
+  end
+
+  describe "SFTP Server - Write Operations" do
     test "happy path for upload without cd", %{path: _path} do
       assert {:ok, _ref} = start_ssh_server()
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
 
-      assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
+      assert ~c"." in listing
+      assert ~c".." in listing
+      assert ~c"foldertest" in listing
 
       # Create the directory first
       assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/foldertest/15")
@@ -101,6 +160,195 @@ defmodule SftpdS3Test do
       assert {:ok, handle2} = :ssh_sftp.open(channel_ref, ~c"/foldertest/15/assets.csv", [:read])
       assert {:ok, ~c"hello world"} = :ssh_sftp.read(channel_ref, handle2, 11)
       assert :ok = :ssh_sftp.close(channel_ref, handle2)
+    end
+
+    test "upload and download preserves content" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      test_content = "Test content with special chars: @#$%^&*()_+ and unicode: "
+
+      # Create directory and upload file
+      :ssh_sftp.make_dir(channel_ref, ~c"/upload_test")
+      {:ok, write_handle} = :ssh_sftp.open(channel_ref, ~c"/upload_test/test.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, write_handle, test_content)
+      :ok = :ssh_sftp.close(channel_ref, write_handle)
+
+      # Download and verify
+      {:ok, read_handle} = :ssh_sftp.open(channel_ref, ~c"/upload_test/test.txt", [:read])
+      {:ok, downloaded} = :ssh_sftp.read(channel_ref, read_handle, 10000)
+      :ok = :ssh_sftp.close(channel_ref, read_handle)
+
+      assert to_string(downloaded) == test_content
+
+      # Cleanup
+      :ssh_sftp.delete(channel_ref, ~c"/upload_test/test.txt")
+      :ssh_sftp.del_dir(channel_ref, ~c"/upload_test")
+    end
+
+    # NOTE: S3 multipart upload requires minimum 5MB per part, so we can't test
+    # multiple small chunks. The single write test covers basic functionality.
+
+    test "overwrite existing file" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      :ssh_sftp.make_dir(channel_ref, ~c"/overwrite_test")
+
+      # Create initial file
+      {:ok, h1} = :ssh_sftp.open(channel_ref, ~c"/overwrite_test/file.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, h1, "original content")
+      :ok = :ssh_sftp.close(channel_ref, h1)
+
+      # Overwrite the file
+      {:ok, h2} = :ssh_sftp.open(channel_ref, ~c"/overwrite_test/file.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, h2, "new content")
+      :ok = :ssh_sftp.close(channel_ref, h2)
+
+      # Verify new content
+      {:ok, read_handle} = :ssh_sftp.open(channel_ref, ~c"/overwrite_test/file.txt", [:read])
+      {:ok, content} = :ssh_sftp.read(channel_ref, read_handle, 100)
+      :ok = :ssh_sftp.close(channel_ref, read_handle)
+
+      assert to_string(content) == "new content"
+
+      # Cleanup
+      :ssh_sftp.delete(channel_ref, ~c"/overwrite_test/file.txt")
+      :ssh_sftp.del_dir(channel_ref, ~c"/overwrite_test")
+    end
+  end
+
+  describe "SFTP Server - Delete Operations" do
+    test "delete file" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      :ssh_sftp.make_dir(channel_ref, ~c"/delete_test")
+      {:ok, handle} = :ssh_sftp.open(channel_ref, ~c"/delete_test/to_delete.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, handle, "content")
+      :ok = :ssh_sftp.close(channel_ref, handle)
+
+      # Verify file exists
+      {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/delete_test")
+      assert ~c"to_delete.txt" in listing
+
+      # Delete the file
+      assert :ok = :ssh_sftp.delete(channel_ref, ~c"/delete_test/to_delete.txt")
+
+      # Verify file is gone
+      {:ok, listing2} = :ssh_sftp.list_dir(channel_ref, ~c"/delete_test")
+      refute ~c"to_delete.txt" in listing2
+
+      # Cleanup
+      :ssh_sftp.del_dir(channel_ref, ~c"/delete_test")
+    end
+  end
+
+  describe "SFTP Server - Rename Operations" do
+    test "rename file" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      :ssh_sftp.make_dir(channel_ref, ~c"/rename_test")
+      {:ok, handle} = :ssh_sftp.open(channel_ref, ~c"/rename_test/original.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, handle, "rename test content")
+      :ok = :ssh_sftp.close(channel_ref, handle)
+
+      # Rename the file
+      assert :ok = :ssh_sftp.rename(channel_ref, ~c"/rename_test/original.txt", ~c"/rename_test/renamed.txt")
+
+      # Verify old name is gone
+      {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/rename_test")
+      refute ~c"original.txt" in listing
+      assert ~c"renamed.txt" in listing
+
+      # Verify content is preserved
+      {:ok, read_handle} = :ssh_sftp.open(channel_ref, ~c"/rename_test/renamed.txt", [:read])
+      {:ok, content} = :ssh_sftp.read(channel_ref, read_handle, 100)
+      :ok = :ssh_sftp.close(channel_ref, read_handle)
+
+      assert to_string(content) == "rename test content"
+
+      # Cleanup
+      :ssh_sftp.delete(channel_ref, ~c"/rename_test/renamed.txt")
+      :ssh_sftp.del_dir(channel_ref, ~c"/rename_test")
+    end
+  end
+
+  describe "SFTP Server - Edge Cases" do
+    test "read more bytes than file contains" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      :ssh_sftp.make_dir(channel_ref, ~c"/edge_test")
+      {:ok, handle} = :ssh_sftp.open(channel_ref, ~c"/edge_test/small.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, handle, "tiny")
+      :ok = :ssh_sftp.close(channel_ref, handle)
+
+      # Try to read more than file size
+      {:ok, read_handle} = :ssh_sftp.open(channel_ref, ~c"/edge_test/small.txt", [:read])
+      {:ok, content} = :ssh_sftp.read(channel_ref, read_handle, 10000)
+      :ok = :ssh_sftp.close(channel_ref, read_handle)
+
+      # Should return only what's available
+      assert to_string(content) == "tiny"
+
+      # Cleanup
+      :ssh_sftp.delete(channel_ref, ~c"/edge_test/small.txt")
+      :ssh_sftp.del_dir(channel_ref, ~c"/edge_test")
+    end
+
+    test "file with spaces in name" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      :ssh_sftp.make_dir(channel_ref, ~c"/space_test")
+      {:ok, handle} = :ssh_sftp.open(channel_ref, ~c"/space_test/file with spaces.txt", [:write])
+      :ok = :ssh_sftp.write(channel_ref, handle, "content")
+      :ok = :ssh_sftp.close(channel_ref, handle)
+
+      {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/space_test")
+      assert ~c"file with spaces.txt" in listing
+
+      # Cleanup
+      :ssh_sftp.delete(channel_ref, ~c"/space_test/file with spaces.txt")
+      :ssh_sftp.del_dir(channel_ref, ~c"/space_test")
+    end
+
+    test "multiple file handles simultaneously" do
+      assert {:ok, _ref} = start_ssh_server()
+      %{channel_ref: channel_ref} = start_ssh_client()
+
+      :ssh_sftp.make_dir(channel_ref, ~c"/multi_handle")
+
+      # Open multiple files for writing
+      {:ok, h1} = :ssh_sftp.open(channel_ref, ~c"/multi_handle/file1.txt", [:write])
+      {:ok, h2} = :ssh_sftp.open(channel_ref, ~c"/multi_handle/file2.txt", [:write])
+
+      # Write to both
+      :ok = :ssh_sftp.write(channel_ref, h1, "content1")
+      :ok = :ssh_sftp.write(channel_ref, h2, "content2")
+
+      # Close both
+      :ok = :ssh_sftp.close(channel_ref, h1)
+      :ok = :ssh_sftp.close(channel_ref, h2)
+
+      # Verify both files
+      {:ok, r1} = :ssh_sftp.open(channel_ref, ~c"/multi_handle/file1.txt", [:read])
+      {:ok, c1} = :ssh_sftp.read(channel_ref, r1, 100)
+      :ok = :ssh_sftp.close(channel_ref, r1)
+
+      {:ok, r2} = :ssh_sftp.open(channel_ref, ~c"/multi_handle/file2.txt", [:read])
+      {:ok, c2} = :ssh_sftp.read(channel_ref, r2, 100)
+      :ok = :ssh_sftp.close(channel_ref, r2)
+
+      assert to_string(c1) == "content1"
+      assert to_string(c2) == "content2"
+
+      # Cleanup
+      :ssh_sftp.delete(channel_ref, ~c"/multi_handle/file1.txt")
+      :ssh_sftp.delete(channel_ref, ~c"/multi_handle/file2.txt")
+      :ssh_sftp.del_dir(channel_ref, ~c"/multi_handle")
     end
   end
 

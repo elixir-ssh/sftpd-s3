@@ -15,9 +15,9 @@
         pkgs = import nixpkgs {inherit system;};
         lib = pkgs.lib;
         erlang = pkgs.erlang.override {
-          version = "27.2";
+          version = "28.0";
           src = pkgs.fetchurl {
-            url = "https://github.com/erlang/otp/releases/download/OTP-27.2/otp_src_27.2.tar.gz";
+            url = "https://github.com/erlang/otp/releases/download/OTP-28.0/otp_src_28.0.tar.gz";
             sha256 = "sha256-tmwsxPoshyEbZo5EhtTz5bG2cFaYhz6j5tmFCAGsmS0=";
           };
         };
@@ -26,7 +26,7 @@
           erlang = erlang;
           version = "1.18.1";
           src = pkgs.fetchurl {
-            url = "https://github.com/elixir-lang/elixir/archive/refs/tags/v${elixir.version}.tar.gz";
+            url = "https://github.com/elixir-lang/elixir/archive/refs/tags/v1.18.1.tar.gz";
             sha256 = "sha256-QjWmPGFcfHh9haUWfbKKWOyfWlefmz/YU/xvTYhsIJ4=";
           };
         };
