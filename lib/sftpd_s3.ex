@@ -26,18 +26,20 @@ defmodule SftpdS3 do
 
   Deprecated: Use `Sftpd.start_server/1` instead.
 
-  ## Examples
+  ## Options
 
-      iex> {:ok, _pid} = SftpdS3.start_server(:rand.uniform(65_535))
+  - `:system_dir` - Directory containing SSH host keys (required)
   """
-  @spec start_server(non_neg_integer()) :: {:ok, :ssh.daemon_ref()} | {:error, term()}
-  def start_server(port \\ 22) do
+  @spec start_server(non_neg_integer(), keyword()) :: {:ok, :ssh.daemon_ref()} | {:error, term()}
+  def start_server(port \\ 22, opts \\ []) do
+    system_dir = Keyword.fetch!(opts, :system_dir)
+
     Sftpd.start_server(
       port: port,
       backend: Sftpd.Backends.S3,
       backend_opts: [bucket: Application.get_env(:sftpd, :bucket)],
       users: [{"user", "password"}],
-      system_dir: "test/fixtures/ssh_keys"
+      system_dir: system_dir
     )
   end
 

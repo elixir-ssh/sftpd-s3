@@ -1,7 +1,7 @@
 defmodule SftpdS3Test do
   use ExUnit.Case, async: false
 
-  doctest SftpdS3
+  @moduletag :integration
 
   @port 1337
 
@@ -12,6 +12,8 @@ defmodule SftpdS3Test do
   ]
 
   setup_all do
+    system_dir = Sftpd.Test.SSHKeys.generate_system_dir()
+
     local_path =
       Path.join([
         File.cwd!(),
@@ -30,12 +32,12 @@ defmodule SftpdS3Test do
     ExAws.S3.upload(file, bucket, "foldertest/11/assets2.csv")
     |> ExAws.request!()
 
-    %{bucket: bucket, path: "foldertest/9/assets.csv", local_path: local_path}
+    %{bucket: bucket, path: "foldertest/9/assets.csv", local_path: local_path, system_dir: system_dir}
   end
 
   describe "SFTP Server - Read Operations" do
-    test "happy path for read", %{path: path, local_path: local_path} do
-      assert {:ok, _ref} = start_ssh_server()
+    test "happy path for read", %{path: path, local_path: local_path, system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
@@ -63,8 +65,8 @@ defmodule SftpdS3Test do
       assert :ok = :ssh_sftp.close(channel_ref, "0")
     end
 
-    test "list_dir returns . and .. entries" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "list_dir returns . and .. entries", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
@@ -73,8 +75,8 @@ defmodule SftpdS3Test do
       assert ~c".." in listing
     end
 
-    test "list_dir in subdirectory returns . and .. entries" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "list_dir in subdirectory returns . and .. entries", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/foldertest")
@@ -83,8 +85,8 @@ defmodule SftpdS3Test do
       assert ~c".." in listing
     end
 
-    test "read_file_info returns error for non-existent file" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "read_file_info returns error for non-existent file", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:error, :no_such_file} =
@@ -93,8 +95,8 @@ defmodule SftpdS3Test do
   end
 
   describe "SFTP Server - Directory Operations" do
-    test "happy path for make and delete directory", %{path: _path} do
-      assert {:ok, _ref} = start_ssh_server()
+    test "happy path for make and delete directory", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
@@ -116,8 +118,8 @@ defmodule SftpdS3Test do
       assert :ok = :ssh_sftp.del_dir(channel_ref, ~c"/foldertest/15")
     end
 
-    test "create nested directories" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "create nested directories", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/nested_test")
@@ -135,8 +137,8 @@ defmodule SftpdS3Test do
   end
 
   describe "SFTP Server - Write Operations" do
-    test "happy path for upload without cd", %{path: _path} do
-      assert {:ok, _ref} = start_ssh_server()
+    test "happy path for upload without cd", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       assert {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/")
@@ -163,8 +165,8 @@ defmodule SftpdS3Test do
       assert :ok = :ssh_sftp.close(channel_ref, handle2)
     end
 
-    test "upload and download preserves content" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "upload and download preserves content", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       test_content = "Test content with special chars: @#$%^&*()_+ and unicode: "
@@ -190,8 +192,8 @@ defmodule SftpdS3Test do
     # NOTE: S3 multipart upload requires minimum 5MB per part, so we can't test
     # multiple small chunks. The single write test covers basic functionality.
 
-    test "overwrite existing file" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "overwrite existing file", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       :ssh_sftp.make_dir(channel_ref, ~c"/overwrite_test")
@@ -220,8 +222,8 @@ defmodule SftpdS3Test do
   end
 
   describe "SFTP Server - Delete Operations" do
-    test "delete file" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "delete file", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       :ssh_sftp.make_dir(channel_ref, ~c"/delete_test")
@@ -246,8 +248,8 @@ defmodule SftpdS3Test do
   end
 
   describe "SFTP Server - Rename Operations" do
-    test "rename file" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "rename file", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       :ssh_sftp.make_dir(channel_ref, ~c"/rename_test")
@@ -282,8 +284,8 @@ defmodule SftpdS3Test do
   end
 
   describe "SFTP Server - Edge Cases" do
-    test "read more bytes than file contains" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "read more bytes than file contains", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       :ssh_sftp.make_dir(channel_ref, ~c"/edge_test")
@@ -304,8 +306,8 @@ defmodule SftpdS3Test do
       :ssh_sftp.del_dir(channel_ref, ~c"/edge_test")
     end
 
-    test "file with spaces in name" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "file with spaces in name", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       :ssh_sftp.make_dir(channel_ref, ~c"/space_test")
@@ -321,8 +323,8 @@ defmodule SftpdS3Test do
       :ssh_sftp.del_dir(channel_ref, ~c"/space_test")
     end
 
-    test "multiple file handles simultaneously" do
-      assert {:ok, _ref} = start_ssh_server()
+    test "multiple file handles simultaneously", %{system_dir: system_dir} do
+      assert {:ok, _ref} = start_ssh_server(system_dir)
       %{channel_ref: channel_ref} = start_ssh_client()
 
       :ssh_sftp.make_dir(channel_ref, ~c"/multi_handle")
@@ -369,8 +371,8 @@ defmodule SftpdS3Test do
     %{client_connection_ref: client_connection_ref, channel_ref: channel_ref}
   end
 
-  defp start_ssh_server do
-    case SftpdS3.start_server(@port) do
+  defp start_ssh_server(system_dir) do
+    case SftpdS3.start_server(@port, system_dir: system_dir) do
       {:ok, ref} ->
         on_exit(fn ->
           :ssh.stop_daemon(ref)

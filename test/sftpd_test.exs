@@ -11,6 +11,7 @@ defmodule SftpdTest do
 
   setup do
     port = 10_000 + :rand.uniform(10_000)
+    system_dir = Sftpd.Test.SSHKeys.generate_system_dir()
 
     {:ok, ref} =
       Sftpd.start_server(
@@ -18,7 +19,7 @@ defmodule SftpdTest do
         backend: Sftpd.Backends.Memory,
         backend_opts: [],
         users: [{"testuser", "testpass"}],
-        system_dir: "test/fixtures/ssh_keys"
+        system_dir: system_dir
       )
 
     {:ok, conn} = :ssh.connect(:localhost, port, @client_opts)
