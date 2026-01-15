@@ -2,7 +2,7 @@ defmodule Sftpd.MixProject do
   use Mix.Project
 
   @version "0.2.0"
-  @source_url "https://github.com/mjc/sftpd"
+  @source_url "https://github.com/elixir-ssh/sftpd-s3"
 
   def project do
     [
