@@ -29,16 +29,22 @@ defmodule SftpdS3 do
   ## Options
 
   - `:system_dir` - Directory containing SSH host keys (required)
+  - `:username` - SFTP username (default: from config or "user")
+  - `:password` - SFTP password (default: from config or "password")
+  - `:bucket` - S3 bucket name (default: from config)
   """
   @spec start_server(non_neg_integer(), keyword()) :: {:ok, :ssh.daemon_ref()} | {:error, term()}
   def start_server(port \\ 22, opts \\ []) do
     system_dir = Keyword.fetch!(opts, :system_dir)
+    bucket = Keyword.get(opts, :bucket, Application.get_env(:sftpd, :bucket))
+    username = Keyword.get(opts, :username, Application.get_env(:sftpd, :username, "user"))
+    password = Keyword.get(opts, :password, Application.get_env(:sftpd, :password, "password"))
 
     Sftpd.start_server(
       port: port,
       backend: Sftpd.Backends.S3,
-      backend_opts: [bucket: Application.get_env(:sftpd, :bucket)],
-      users: [{"user", "password"}],
+      backend_opts: [bucket: bucket],
+      users: [{username, password}],
       system_dir: system_dir
     )
   end

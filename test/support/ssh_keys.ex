@@ -33,11 +33,11 @@ defmodule Sftpd.Test.SSHKeys do
     dir = Path.join(System.tmp_dir!(), "sftpd_test_keys_#{timestamp}_#{random}")
     File.mkdir_p!(dir)
 
-    # Clean up on process exit
-    Process.flag(:trap_exit, true)
+    # Clean up when calling process exits
+    caller = self()
 
-    spawn_link(fn ->
-      ref = Process.monitor(self())
+    spawn(fn ->
+      ref = Process.monitor(caller)
 
       receive do
         {:DOWN, ^ref, :process, _, _} ->

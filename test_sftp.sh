@@ -59,9 +59,15 @@ echo ""
 echo -e "${YELLOW}Step 3: Running SFTP upload/download test...${NC}"
 echo ""
 
-MIX_ENV=test mix run test_manual.exs
-
-echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}=== All tests passed successfully! ===${NC}"
-echo -e "${GREEN}========================================${NC}"
+if MIX_ENV=test mix run test_manual.exs; then
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}=== All tests passed successfully! ===${NC}"
+    echo -e "${GREEN}========================================${NC}"
+else
+    echo ""
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}=== Test failed! ===${NC}"
+    echo -e "${RED}========================================${NC}"
+    exit 1
+fi

@@ -136,21 +136,45 @@ defmodule Sftpd.Backend do
   - `size` - File size in bytes
   - `mtime` - Modification time as Erlang datetime tuple `{{Y,M,D},{H,M,S}}`
   - `access` - Access mode, one of `:read`, `:write`, `:read_write`
+
+  ## File Info Tuple Structure
+
+  The tuple matches Erlang's `#file_info{}` record:
+
+      {:file_info,
+        size,           # File size in bytes
+        type,           # :regular | :directory | :symlink | etc.
+        access,         # :read | :write | :read_write | :none
+        atime,          # Last access time {{Y,M,D},{H,M,S}}
+        mtime,          # Last modification time
+        ctime,          # Creation/change time
+        mode,           # Unix permission bits (33188 = 0o100644 = regular file, rw-r--r--)
+        links,          # Number of hard links
+        major_device,   # Major device number (0 for regular files)
+        minor_device,   # Minor device number (0 for regular files)
+        inode,          # Inode number (random for virtual filesystems)
+        uid,            # Owner user ID
+        gid}            # Owner group ID
   """
   @spec file_info(non_neg_integer(), :calendar.datetime(), :read | :write | :read_write) ::
           file_info()
   def file_info(size, mtime, access \\ :read_write) do
+    # 33188 = 0o100644 = regular file with rw-r--r-- permissions
     {:file_info, size, :regular, access, mtime, mtime, mtime, 33188, 1, 0, 0,
      :rand.uniform(32767), 1, 1}
   end
 
   @doc """
   Build a file_info tuple for a directory.
+
+  Returns a directory with mode 16877 (0o40755 = directory with rwxr-xr-x permissions).
   """
   @spec directory_info() :: file_info()
   def directory_info do
     timestamp = NaiveDateTime.utc_now() |> NaiveDateTime.to_erl()
 
+    # 16877 = 0o40755 = directory with rwxr-xr-x permissions
+    # 4096 = typical directory size on Unix filesystems
     {:file_info, 4096, :directory, :read, timestamp, timestamp, timestamp, 16877, 2, 0, 0, 0, 1,
      1}
   end

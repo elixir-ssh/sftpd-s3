@@ -208,14 +208,11 @@ defmodule Sftpd.Backends.S3 do
   def read_file(path, %{bucket: bucket, prefix: global_prefix}) do
     key = global_prefix <> Backend.normalize_path(path)
 
-    content =
-      ExAws.S3.download_file(bucket, key, :memory)
-      |> ExAws.stream!()
-      |> Enum.join()
-
-    {:ok, content}
-  rescue
-    _ -> {:error, :enoent}
+    case ExAws.request(ExAws.S3.get_object(bucket, key)) do
+      {:ok, %{body: body}} -> {:ok, body}
+      {:error, {:http_error, 404, _}} -> {:error, :enoent}
+      {:error, _} -> {:error, :eio}
+    end
   end
 
   @impl true
@@ -238,35 +235,38 @@ defmodule Sftpd.Backends.S3 do
     end
   end
 
+  @months %{
+    "Jan" => 1,
+    "Feb" => 2,
+    "Mar" => 3,
+    "Apr" => 4,
+    "May" => 5,
+    "Jun" => 6,
+    "Jul" => 7,
+    "Aug" => 8,
+    "Sep" => 9,
+    "Oct" => 10,
+    "Nov" => 11,
+    "Dec" => 12
+  }
+
   defp parse_rfc1123(date_string) do
     regex = ~r/\w+, (\d+) (\w+) (\d+) (\d+):(\d+):(\d+) GMT/
 
-    case Regex.run(regex, date_string) do
-      [_, day, month, year, hour, min, sec] ->
-        month_num = month_to_number(month)
-        date = {String.to_integer(year), month_num, String.to_integer(day)}
-        time = {String.to_integer(hour), String.to_integer(min), String.to_integer(sec)}
-        {:ok, {date, time}}
-
-      _ ->
-        {:error, :invalid_format}
+    with [_, day, month, year, hour, min, sec] <- Regex.run(regex, date_string),
+         {:ok, month_num} <- month_to_number(month) do
+      date = {String.to_integer(year), month_num, String.to_integer(day)}
+      time = {String.to_integer(hour), String.to_integer(min), String.to_integer(sec)}
+      {:ok, {date, time}}
+    else
+      _ -> {:error, :invalid_format}
     end
   end
 
   defp month_to_number(month) do
-    %{
-      "Jan" => 1,
-      "Feb" => 2,
-      "Mar" => 3,
-      "Apr" => 4,
-      "May" => 5,
-      "Jun" => 6,
-      "Jul" => 7,
-      "Aug" => 8,
-      "Sep" => 9,
-      "Oct" => 10,
-      "Nov" => 11,
-      "Dec" => 12
-    }[month] || 1
+    case Map.fetch(@months, month) do
+      {:ok, num} -> {:ok, num}
+      :error -> {:error, :invalid_month}
+    end
   end
 end

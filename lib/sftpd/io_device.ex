@@ -36,8 +36,9 @@ defmodule Sftpd.IODevice do
       {:ok, content} ->
         {:noreply, Map.merge(state, %{content: content, size: byte_size(content), position: 0})}
 
-      {:error, _reason} ->
-        {:noreply, Map.merge(state, %{content: <<>>, size: 0, position: 0})}
+      {:error, reason} ->
+        Logger.warning("Failed to read file #{inspect(path)}: #{inspect(reason)}")
+        {:noreply, Map.merge(state, %{error: reason, content: <<>>, size: 0, position: 0})}
     end
   end
 
@@ -61,6 +62,10 @@ defmodule Sftpd.IODevice do
 
   def handle_call({:position, offset}, _from, state) when is_integer(offset) do
     {:reply, {:ok, offset}, state}
+  end
+
+  def handle_call({:read, _length}, _from, %{error: reason} = state) do
+    {:reply, {:error, reason}, state}
   end
 
   def handle_call({:read, _length}, _from, %{size: size, position: pos} = state)
