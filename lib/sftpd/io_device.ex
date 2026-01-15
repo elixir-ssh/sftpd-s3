@@ -43,6 +43,9 @@ defmodule Sftpd.IODevice do
   end
 
   def handle_continue(:open, %{mode: :write} = state) do
+    # Initialize empty buffer to accumulate writes. Content is uploaded to the
+    # backend on close/terminate, allowing small writes to be batched into a
+    # single S3 upload (S3 multipart requires minimum 5MB per part).
     {:noreply, Map.put(state, :buffer, <<>>)}
   end
 

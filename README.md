@@ -21,7 +21,7 @@ end
   backend: Sftpd.Backends.Memory,
   backend_opts: [],
   users: [{"dev", "dev"}],
-  system_dir: Sftpd.SSHKeys.generate_system_dir()
+  system_dir: "/path/to/ssh_host_keys"
 )
 
 # Connect with: sftp -P 2222 dev@localhost
@@ -39,7 +39,7 @@ Sftpd.start_server(
   backend: Sftpd.Backends.Memory,
   backend_opts: [],
   users: [{"user", "pass"}],
-  system_dir: Sftpd.SSHKeys.generate_system_dir()
+  system_dir: "/path/to/ssh_host_keys"
 )
 ```
 
@@ -79,18 +79,22 @@ Implement the `Sftpd.Backend` behaviour to create custom storage backends.
 
 ## SSH Host Keys
 
-For production, generate SSH host keys:
+Generate SSH host keys for your server:
 
 ```bash
-ssh-keygen -t rsa -f ssh_host_rsa_key -N ""
-ssh-keygen -t ecdsa -f ssh_host_ecdsa_key -N ""
-ssh-keygen -t ed25519 -f ssh_host_ed25519_key -N ""
+mkdir -p ssh_keys
+ssh-keygen -t rsa -f ssh_keys/ssh_host_rsa_key -N ""
+ssh-keygen -t ecdsa -f ssh_keys/ssh_host_ecdsa_key -N ""
+ssh-keygen -t ed25519 -f ssh_keys/ssh_host_ed25519_key -N ""
 ```
 
-For development, use the built-in key generator:
+Then pass the directory to `system_dir`:
 
 ```elixir
-system_dir = Sftpd.SSHKeys.generate_system_dir()
+Sftpd.start_server(
+  # ...
+  system_dir: "ssh_keys"
+)
 ```
 
 ## Documentation

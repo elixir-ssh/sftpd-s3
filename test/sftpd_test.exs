@@ -11,7 +11,7 @@ defmodule SftpdTest do
 
   setup do
     port = 10_000 + :rand.uniform(10_000)
-    system_dir = Sftpd.SSHKeys.generate_system_dir()
+    system_dir = Sftpd.Test.SSHKeys.generate_system_dir()
 
     {:ok, ref} =
       Sftpd.start_server(

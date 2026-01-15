@@ -246,7 +246,12 @@ defmodule Sftpd.Backends.S3 do
 
   # HTTP date parsing helpers
 
-  @doc false
+  @doc """
+  Parse an HTTP date string (RFC 1123 format) into an Erlang datetime tuple.
+
+  Returns the current time if parsing fails. This function is public to allow
+  unit testing of date parsing logic without requiring S3 integration.
+  """
   @spec parse_http_date(String.t()) :: :calendar.datetime()
   def parse_http_date(date_string) do
     # Try RFC 1123 format: "Sun, 06 Nov 1994 08:49:37 GMT"

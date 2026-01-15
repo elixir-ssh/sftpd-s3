@@ -12,7 +12,7 @@ defmodule SftpdS3Test do
   ]
 
   setup_all do
-    system_dir = Sftpd.SSHKeys.generate_system_dir()
+    system_dir = Sftpd.Test.SSHKeys.generate_system_dir()
 
     local_path =
       Path.join([
