@@ -2,22 +2,25 @@
 
 ## Project Overview
 
-SftpdS3 is an Elixir library that provides an SFTP server backed by S3 storage. It implements a file handler for OTP's `:ssh_sftpd` subsystem, providing virtual access to an S3 bucket.
+Sftpd is an Elixir library that provides a pluggable SFTP server with support for multiple backends (S3, memory, custom). It implements a file handler for OTP's `:ssh_sftpd` subsystem.
 
 ## Architecture
 
-- `lib/sftpd_s3.ex` - Main module, starts the SSH daemon
-- `lib/sftpd_s3/s3/file_handler.ex` - Implements `:ssh_sftpd_file_api` behaviour
-- `lib/sftpd_s3/s3/io_device.ex` - GenServer managing file handles for read/write operations
-- `lib/sftpd_s3/s3/operations.ex` - S3 operations wrapper (list, read, write, delete, rename)
+- `lib/sftpd.ex` - Main module, starts the SSH daemon with configurable backend
+- `lib/sftpd/backend.ex` - Behaviour definition for storage backends
+- `lib/sftpd/file_handler.ex` - Implements `:ssh_sftpd_file_api` behaviour
+- `lib/sftpd/io_device.ex` - GenServer managing file handles for read/write operations
+- `lib/sftpd/backends/s3.ex` - S3 storage backend
+- `lib/sftpd/backends/memory.ex` - In-memory backend for testing
+- `lib/sftpd_s3.ex` - Legacy wrapper (deprecated)
 
 ## Development
 
 ### Prerequisites
 
-- Erlang/OTP 28+
-- Elixir 1.19+
-- LocalStack for local S3 testing
+- Erlang/OTP 28.3.1 (see `.tool-versions`)
+- Elixir 1.19.5 (see `.tool-versions`)
+- LocalStack for S3 integration tests
 
 ### Version Management
 
