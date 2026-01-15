@@ -14,22 +14,9 @@
       system: let
         pkgs = import nixpkgs {inherit system;};
         lib = pkgs.lib;
-        erlang = pkgs.erlang.override {
-          version = "27.2";
-          src = pkgs.fetchurl {
-            url = "https://github.com/erlang/otp/releases/download/OTP-27.2/otp_src_27.2.tar.gz";
-            sha256 = "sha256-tmwsxPoshyEbZo5EhtTz5bG2cFaYhz6j5tmFCAGsmS0=";
-          };
-        };
-        beamPackages = pkgs.beam.packagesWith erlang;
-        elixir = beamPackages.elixir.override {
-          erlang = erlang;
-          version = "1.18.1";
-          src = pkgs.fetchurl {
-            url = "https://github.com/elixir-lang/elixir/archive/refs/tags/v${elixir.version}.tar.gz";
-            sha256 = "sha256-QjWmPGFcfHh9haUWfbKKWOyfWlefmz/YU/xvTYhsIJ4=";
-          };
-        };
+        beamPackages = pkgs.beam.packages.erlang_28;
+        erlang = beamPackages.erlang;
+        elixir = beamPackages.elixir_1_19;
       in {
         devShell = pkgs.mkShell {
           nativeBuildInputs =

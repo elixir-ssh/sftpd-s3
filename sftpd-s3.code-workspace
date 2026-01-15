@@ -6,6 +6,7 @@
 	],
 	"settings": {
 		"cSpell.words": [
+			"einval",
 			"ERL_AFLAGS",
 			"fetchurl",
 			"inotify",
