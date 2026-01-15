@@ -36,7 +36,6 @@ defmodule SftpdS3.S3.FileHandler do
 
   @impl true
   def is_dir(path, %{bucket: bucket} = state) do
-
     case Operations.read_link_info(path, bucket) do
       {:ok, {:file_info, _, :directory, _, _, _, _, _, _, _, _, _, _, _}} ->
         {true, state}
@@ -86,20 +85,20 @@ defmodule SftpdS3.S3.FileHandler do
 
   @impl true
   def open(path, [:binary, :read], %{bucket: bucket} = state) do
-    {IODevice.start_link(%{path: path, bucket: bucket, mode: :read}), state}
+    {IODevice.start(%{path: path, bucket: bucket, mode: :read}), state}
   end
 
   def open(path, [:binary, :write], %{bucket: bucket} = state) do
-    {IODevice.start_link(%{path: path, bucket: bucket, mode: :write}), state}
+    {IODevice.start(%{path: path, bucket: bucket, mode: :write}), state}
   end
 
   def open(path, modes, %{bucket: bucket} = state) do
     cond do
       :write in modes ->
-        {IODevice.start_link(%{path: path, bucket: bucket, mode: :write}), state}
+        {IODevice.start(%{path: path, bucket: bucket, mode: :write}), state}
 
       :read in modes ->
-        {IODevice.start_link(%{path: path, bucket: bucket, mode: :read}), state}
+        {IODevice.start(%{path: path, bucket: bucket, mode: :read}), state}
 
       true ->
         {{:error, :einval}, state}

@@ -50,7 +50,8 @@ defmodule SftpdS3Test do
                :ssh_sftp.read_file_info(channel_ref, ~c"/foldertest")
 
       assert {:ok,
-              {:file_info, size, :regular, :read_write, _time, _time2, _time3, _, _, _, _, _, _, _}} =
+              {:file_info, size, :regular, :read_write, _time, _time2, _time3, _, _, _, _, _, _,
+               _}} =
                :ssh_sftp.read_file_info(channel_ref, path |> to_charlist())
 
       assert {:ok, "0"} = :ssh_sftp.open(channel_ref, path |> to_charlist(), [:read])
@@ -255,7 +256,12 @@ defmodule SftpdS3Test do
       :ok = :ssh_sftp.close(channel_ref, handle)
 
       # Rename the file
-      assert :ok = :ssh_sftp.rename(channel_ref, ~c"/rename_test/original.txt", ~c"/rename_test/renamed.txt")
+      assert :ok =
+               :ssh_sftp.rename(
+                 channel_ref,
+                 ~c"/rename_test/original.txt",
+                 ~c"/rename_test/renamed.txt"
+               )
 
       # Verify old name is gone
       {:ok, listing} = :ssh_sftp.list_dir(channel_ref, ~c"/rename_test")

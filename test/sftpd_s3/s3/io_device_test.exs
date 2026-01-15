@@ -24,11 +24,12 @@ defmodule SftpdS3.S3.IODeviceTest do
     test "starts successfully for existing file" do
       ExAws.S3.put_object(@bucket, "test_read.txt", "hello world") |> ExAws.request!()
 
-      assert {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/test_read.txt",
-        bucket: @bucket,
-        mode: :read
-      })
+      assert {:ok, pid} =
+               IODevice.start(%{
+                 path: ~c"/test_read.txt",
+                 bucket: @bucket,
+                 mode: :read
+               })
 
       assert Process.alive?(pid)
       GenServer.stop(pid)
@@ -38,11 +39,12 @@ defmodule SftpdS3.S3.IODeviceTest do
       content = "test content for reading"
       ExAws.S3.put_object(@bucket, "read_content.txt", content) |> ExAws.request!()
 
-      {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/read_content.txt",
-        bucket: @bucket,
-        mode: :read
-      })
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/read_content.txt",
+          bucket: @bucket,
+          mode: :read
+        })
 
       Process.sleep(100)
 
@@ -56,11 +58,12 @@ defmodule SftpdS3.S3.IODeviceTest do
     test "returns eof for empty file" do
       ExAws.S3.put_object(@bucket, "empty.txt", "") |> ExAws.request!()
 
-      {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/empty.txt",
-        bucket: @bucket,
-        mode: :read
-      })
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/empty.txt",
+          bucket: @bucket,
+          mode: :read
+        })
 
       Process.sleep(100)
 
@@ -72,11 +75,12 @@ defmodule SftpdS3.S3.IODeviceTest do
     test "position call returns ok" do
       ExAws.S3.put_object(@bucket, "position_test.txt", "content") |> ExAws.request!()
 
-      {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/position_test.txt",
-        bucket: @bucket,
-        mode: :read
-      })
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/position_test.txt",
+          bucket: @bucket,
+          mode: :read
+        })
 
       Process.sleep(100)
 
@@ -88,22 +92,24 @@ defmodule SftpdS3.S3.IODeviceTest do
 
   describe "write mode" do
     test "starts successfully for new file" do
-      assert {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/new_write_file.txt",
-        bucket: @bucket,
-        mode: :write
-      })
+      assert {:ok, pid} =
+               IODevice.start(%{
+                 path: ~c"/new_write_file.txt",
+                 bucket: @bucket,
+                 mode: :write
+               })
 
       assert Process.alive?(pid)
       GenServer.stop(pid)
     end
 
     test "write call returns ok" do
-      {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/write_test.txt",
-        bucket: @bucket,
-        mode: :write
-      })
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/write_test.txt",
+          bucket: @bucket,
+          mode: :write
+        })
 
       Process.sleep(100)
 
@@ -113,11 +119,12 @@ defmodule SftpdS3.S3.IODeviceTest do
     end
 
     test "position in write mode returns ok" do
-      {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/position_write.txt",
-        bucket: @bucket,
-        mode: :write
-      })
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/position_write.txt",
+          bucket: @bucket,
+          mode: :write
+        })
 
       Process.sleep(100)
 
@@ -132,11 +139,12 @@ defmodule SftpdS3.S3.IODeviceTest do
       binary_content = <<0, 1, 2, 3, 255, 254, 253>>
       ExAws.S3.put_object(@bucket, "binary.bin", binary_content) |> ExAws.request!()
 
-      {:ok, pid} = IODevice.start_link(%{
-        path: ~c"/binary.bin",
-        bucket: @bucket,
-        mode: :read
-      })
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/binary.bin",
+          bucket: @bucket,
+          mode: :read
+        })
 
       Process.sleep(100)
 

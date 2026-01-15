@@ -98,8 +98,8 @@ defmodule SftpdS3.S3.OperationsTest do
 
     test "returns directory info for /", %{bucket: bucket} do
       assert {:ok,
-              {:file_info, 640, :directory, :read, _, _, _, 16877, 20, 16_777_230, 0, 2,
-               1, 1}} = Operations.read_link_info(~c"/", bucket)
+              {:file_info, 640, :directory, :read, _, _, _, 16877, 20, 16_777_230, 0, 2, 1, 1}} =
+               Operations.read_link_info(~c"/", bucket)
     end
 
     test "returns directory info for /.", %{bucket: bucket} do
@@ -130,14 +130,15 @@ defmodule SftpdS3.S3.OperationsTest do
       content = "test file content"
       ExAws.S3.put_object(bucket, "test_file.txt", content) |> ExAws.request!()
 
-      assert {:ok,
-              {:file_info, size, :regular, :read_write, _, _, _, 33261, 1, 0, 0, _,
-               1, 1}} = Operations.read_link_info(~c"/test_file.txt", bucket)
+      assert {:ok, {:file_info, size, :regular, :read_write, _, _, _, 33261, 1, 0, 0, _, 1, 1}} =
+               Operations.read_link_info(~c"/test_file.txt", bucket)
 
       assert size == byte_size(content)
     end
 
-    test "returns directory info for virtual directories (prefix with contents)", %{bucket: bucket} do
+    test "returns directory info for virtual directories (prefix with contents)", %{
+      bucket: bucket
+    } do
       ExAws.S3.put_object(bucket, "virtual_dir/file.txt", "content") |> ExAws.request!()
 
       assert {:ok, {:file_info, 640, :directory, :read, _, _, _, _, _, _, _, _, _, _}} =
@@ -224,7 +225,8 @@ defmodule SftpdS3.S3.OperationsTest do
     test "returns valid file_info tuple" do
       info = Operations.fake_directory_info()
 
-      assert {:file_info, 640, :directory, :read, _, _, _, 16877, 20, 16_777_230, 0, 2, 1, 1} = info
+      assert {:file_info, 640, :directory, :read, _, _, _, 16877, 20, 16_777_230, 0, 2, 1, 1} =
+               info
     end
 
     test "returns current timestamp" do

@@ -3,86 +3,79 @@ defmodule SftpdS3.S3.Operations do
   Wraps ExAws.S3 operations with the output that :ssh_sftpd expects.
   """
 
-  # TODO: all of this code is very poorly written and should be refactored before this PR is merged.
+  @doc """
+  Converts an SFTP path (charlist or string) to an S3 key.
+  Removes leading slashes since S3 keys don't use them.
+  """
+  @spec to_s3_key(charlist() | String.t()) :: String.t()
+  def to_s3_key(path) do
+    path |> to_string() |> String.trim_leading("/")
+  end
 
-  @spec read_stream(String.t() | charlist(), String.t()) :: any
+  @spec read_stream(String.t() | charlist(), String.t()) :: Enumerable.t()
   def read_stream(key, bucket) do
-    ExAws.S3.download_file(bucket, key, :memory)
+    ExAws.S3.download_file(bucket, to_s3_key(key), :memory)
     |> ExAws.stream!()
   end
 
-  @spec make_dir(charlist, String.t()) :: :ok | {:error, :eexists}
+  @spec make_dir(charlist(), String.t()) :: :ok | {:error, :eexists}
   def make_dir(path, bucket) do
-    key = (path |> to_string()) <> "/.keep"
-    req = ExAws.S3.put_object(bucket, key, "")
+    key = to_s3_key(path) <> "/.keep"
 
-    case ExAws.request(req) do
-      {:ok, _} ->
-        :ok
-
-      {:error, _} ->
-        {:error, :eexists}
+    case ExAws.request(ExAws.S3.put_object(bucket, key, "")) do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, :eexists}
     end
   end
 
-  @spec del_dir(charlist, String.t()) :: :ok | {:error, :enoent}
+  @spec del_dir(charlist(), String.t()) :: :ok | {:error, :enoent}
   def del_dir(path, bucket) do
-    key = (path |> to_string()) <> "/.keep"
-    req = ExAws.S3.delete_object(bucket, key)
+    key = to_s3_key(path) <> "/.keep"
 
-    case ExAws.request(req) do
-      {:ok, _} ->
-        :ok
-
-      {:error, _} ->
-        {:error, :enoent}
+    case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, :enoent}
     end
   end
 
-  @spec list_dir(charlist, String.t() | nil) :: any
+  @spec list_dir(charlist, String.t()) :: [charlist()]
   def list_dir(path, bucket) when path in [~c"/", ~c"/."] do
-    req = ExAws.S3.list_objects_v2(bucket)
-
-    case ExAws.request(req) do
+    case ExAws.request(ExAws.S3.list_objects_v2(bucket)) do
       {:ok, %{body: %{contents: contents}}} ->
         contents
-        |> get_in([Access.all(), :key])
-        |> Enum.map(fn key ->
-          Path.split(key) |> List.first() |> to_charlist()
-        end)
+        |> Enum.map(& &1.key)
+        |> Enum.map(&(Path.split(&1) |> List.first()))
+        |> Enum.reject(&(&1 == ".keep"))
         |> Enum.uniq()
+        |> Enum.map(&to_charlist/1)
         |> Enum.concat([~c".", ~c".."])
 
-      {:error, err} ->
-        err
+      {:error, _} ->
+        [~c".", ~c".."]
     end
   end
 
   def list_dir(path, bucket) do
-    path = path |> to_string() |> String.trim("/")
-    path = "#{path}/"
+    prefix = to_s3_key(path) <> "/"
 
-    req = ExAws.S3.list_objects_v2(bucket, prefix: path)
-
-    case ExAws.request(req) do
+    case ExAws.request(ExAws.S3.list_objects_v2(bucket, prefix: prefix)) do
       {:ok, %{body: %{contents: contents}}} ->
-        # get_in/2 is slow but easy to write.
         contents
-        |> get_in([Access.all(), :key])
+        |> Enum.map(& &1.key)
+        |> Enum.map(&String.trim_leading(&1, prefix))
         |> Enum.map(fn key ->
-          key_without_prefix = key |> String.trim_leading(path)
-
-          case Path.dirname(key_without_prefix) do
-            "." -> key_without_prefix
+          case Path.dirname(key) do
+            "." -> key
             dirname -> dirname
           end
-          |> to_charlist()
         end)
+        |> Enum.reject(&(&1 in ["", ".keep"]))
         |> Enum.uniq()
+        |> Enum.map(&to_charlist/1)
         |> Enum.concat([~c".", ~c".."])
 
-      {:error, err} ->
-        err
+      {:error, _} ->
+        [~c".", ~c".."]
     end
   end
 
@@ -105,109 +98,72 @@ defmodule SftpdS3.S3.Operations do
   end
 
   defp read_link_info_from_s3(path, bucket) do
-    key = path |> to_string()
-    head_object = ExAws.S3.head_object(bucket, key)
+    key = to_s3_key(path)
 
-    case ExAws.request(head_object) do
+    case ExAws.request(ExAws.S3.head_object(bucket, key)) do
       {:ok, %{headers: headers}} ->
-        mtime =
-          headers
-          |> List.keyfind("Last-Modified", 0)
-          |> then(fn
-            nil -> NaiveDateTime.utc_now() |> NaiveDateTime.to_erl()
-            {_, lm} -> get_erl_time_from_rfc1123(lm)
-          end)
+        mtime = extract_mtime(headers)
+        size = extract_size(headers)
+        {:ok, file_info(size, :regular, :read_write, mtime)}
 
-        size =
-          headers
-          |> List.keyfind("Content-Length", 0)
-          |> then(fn
-            nil -> 0
-            {_, length} -> String.to_integer(length)
-          end)
-
-        {:ok,
-         {
-           :file_info,
-           # size
-           size,
-           # type,
-           :regular,
-           # access
-           :read_write,
-           # atime
-           mtime,
-           # mtime
-           mtime,
-           # ctime
-           mtime,
-           # unix_permission_mode
-           33261,
-           # hard_link_count
-           1,
-           # major_device
-           0,
-           # minor_device
-           0,
-           # inode
-           Enum.random(0..32767),
-           # uid
-           1,
-           # gid
-           1
-         }}
-
-      {:error, _err} ->
+      {:error, _} ->
         # Check if it might be a directory (has objects with this prefix)
-        prefix = (key |> String.trim_leading("/")) <> "/"
-        list_req = ExAws.S3.list_objects_v2(bucket, prefix: prefix, max_keys: 1)
-
-        case ExAws.request(list_req) do
-          {:ok, %{body: %{contents: [_ | _]}}} ->
-            # Has contents with this prefix, so it's a directory
-            {:ok, fake_directory_info()}
-
-          _ ->
-            # Not a file and not a directory with contents
-            {:error, :enoent}
-        end
+        check_directory_exists(key, bucket)
     end
   end
 
-  @spec delete(charlist, String.t()) :: :ok | {:error, :enoent}
+  defp check_directory_exists(key, bucket) do
+    prefix = key <> "/"
+    list_req = ExAws.S3.list_objects_v2(bucket, prefix: prefix, max_keys: 1)
+
+    case ExAws.request(list_req) do
+      {:ok, %{body: %{contents: [_ | _]}}} ->
+        {:ok, fake_directory_info()}
+
+      _ ->
+        {:error, :enoent}
+    end
+  end
+
+  defp extract_mtime(headers) do
+    case List.keyfind(headers, "Last-Modified", 0) do
+      nil -> NaiveDateTime.utc_now() |> NaiveDateTime.to_erl()
+      {_, lm} -> get_erl_time_from_rfc1123(lm)
+    end
+  end
+
+  defp extract_size(headers) do
+    case List.keyfind(headers, "Content-Length", 0) do
+      nil -> 0
+      {_, length} -> String.to_integer(length)
+    end
+  end
+
+  defp file_info(size, type, access, mtime) do
+    {:file_info, size, type, access, mtime, mtime, mtime, 33261, 1, 0, 0, :rand.uniform(32767), 1,
+     1}
+  end
+
+  @spec delete(charlist(), String.t()) :: :ok | {:error, :enoent}
   def delete(path, bucket) do
-    key = path |> to_string()
-    req = ExAws.S3.delete_object(bucket, key)
+    key = to_s3_key(path)
 
-    case ExAws.request(req) do
-      {:ok, _} ->
-        :ok
-
-      {:error, _} ->
-        {:error, :enoent}
+    case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, :enoent}
     end
   end
 
-  @spec rename(charlist, charlist, String.t()) :: :ok | {:error, atom}
+  @spec rename(charlist(), charlist(), String.t()) :: :ok | {:error, atom()}
   def rename(src, dst, bucket) do
-    src_key = src |> to_string()
-    dst_key = dst |> to_string()
+    src_key = to_s3_key(src)
+    dst_key = to_s3_key(dst)
 
-    # Copy the object to the new location
-    copy_req = ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)
-
-    case ExAws.request(copy_req) do
-      {:ok, _} ->
-        # Delete the old object
-        delete_req = ExAws.S3.delete_object(bucket, src_key)
-
-        case ExAws.request(delete_req) do
-          {:ok, _} -> :ok
-          {:error, _} -> {:error, :enoent}
-        end
-
-      {:error, _} ->
-        {:error, :enoent}
+    with {:ok, _} <- ExAws.request(ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
+         {:ok, _} <- ExAws.request(ExAws.S3.delete_object(bucket, src_key)) do
+      :ok
+    else
+      {:error, _} -> {:error, :enoent}
     end
   end
 
