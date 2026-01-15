@@ -44,9 +44,18 @@ defmodule Sftpd.Backends.S3 do
 
   @behaviour Sftpd.Backend
 
+  require Logger
+
   alias Sftpd.Backend
 
+  # Marker file used to represent empty directories in S3
+  @keep_marker ".keep"
+
+  @typedoc "S3 backend state containing bucket name and optional prefix"
+  @type state :: %{bucket: String.t(), prefix: String.t()}
+
   @impl true
+  @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     bucket = Keyword.fetch!(opts, :bucket)
     prefix = Keyword.get(opts, :prefix, "")
@@ -54,6 +63,7 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec list_dir(Backend.path(), state()) :: {:ok, [charlist()]} | {:error, atom()}
   def list_dir(path, %{bucket: bucket, prefix: global_prefix}) do
     if root_path?(path) do
       list_root(bucket, global_prefix)
@@ -72,13 +82,14 @@ defmodule Sftpd.Backends.S3 do
           |> Enum.map(& &1.key)
           |> Enum.map(&trim_prefix(&1, global_prefix))
           |> Enum.map(&(Path.split(&1) |> List.first()))
-          |> Enum.reject(&(&1 in ["", ".keep"]))
+          |> Enum.reject(&(&1 in ["", @keep_marker]))
           |> Enum.uniq()
           |> Enum.map(&to_charlist/1)
 
         {:ok, [~c".", ~c".." | entries]}
 
-      {:error, _} ->
+      {:error, reason} ->
+        Logger.warning("S3 list_dir failed for bucket #{bucket}: #{inspect(reason)}")
         {:ok, [~c".", ~c".."]}
     end
   end
@@ -101,18 +112,20 @@ defmodule Sftpd.Backends.S3 do
               dirname -> dirname
             end
           end)
-          |> Enum.reject(&(&1 in ["", ".keep"]))
+          |> Enum.reject(&(&1 in ["", @keep_marker]))
           |> Enum.uniq()
           |> Enum.map(&to_charlist/1)
 
         {:ok, [~c".", ~c".." | entries]}
 
-      {:error, _} ->
+      {:error, reason} ->
+        Logger.warning("S3 list_dir failed for path #{inspect(path)}: #{inspect(reason)}")
         {:ok, [~c".", ~c".."]}
     end
   end
 
   @impl true
+  @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
   def file_info(path, %{bucket: bucket, prefix: global_prefix}) do
     # Root path is always a directory
     if root_path?(path) do
@@ -160,8 +173,9 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec make_dir(Backend.path(), state()) :: :ok | {:error, atom()}
   def make_dir(path, %{bucket: bucket, prefix: global_prefix}) do
-    key = global_prefix <> Backend.normalize_path(path) <> "/.keep"
+    key = global_prefix <> Backend.normalize_path(path) <> "/" <> @keep_marker
 
     case ExAws.request(ExAws.S3.put_object(bucket, key, "")) do
       {:ok, _} -> :ok
@@ -170,8 +184,9 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec del_dir(Backend.path(), state()) :: :ok | {:error, atom()}
   def del_dir(path, %{bucket: bucket, prefix: global_prefix}) do
-    key = global_prefix <> Backend.normalize_path(path) <> "/.keep"
+    key = global_prefix <> Backend.normalize_path(path) <> "/" <> @keep_marker
 
     case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
       {:ok, _} -> :ok
@@ -181,6 +196,7 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec delete(Backend.path(), state()) :: :ok | {:error, term()}
   def delete(path, %{bucket: bucket, prefix: global_prefix}) do
     key = global_prefix <> Backend.normalize_path(path)
 
@@ -192,6 +208,7 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec rename(Backend.path(), Backend.path(), state()) :: :ok | {:error, atom()}
   def rename(src, dst, %{bucket: bucket, prefix: global_prefix}) do
     src_key = global_prefix <> Backend.normalize_path(src)
     dst_key = global_prefix <> Backend.normalize_path(dst)
@@ -205,6 +222,7 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec read_file(Backend.path(), state()) :: {:ok, binary()} | {:error, atom()}
   def read_file(path, %{bucket: bucket, prefix: global_prefix}) do
     key = global_prefix <> Backend.normalize_path(path)
 
@@ -216,6 +234,7 @@ defmodule Sftpd.Backends.S3 do
   end
 
   @impl true
+  @spec write_file(Backend.path(), binary(), state()) :: :ok | {:error, term()}
   def write_file(path, content, %{bucket: bucket, prefix: global_prefix}) do
     key = global_prefix <> Backend.normalize_path(path)
 
@@ -227,7 +246,9 @@ defmodule Sftpd.Backends.S3 do
 
   # HTTP date parsing helpers
 
-  defp parse_http_date(date_string) do
+  @doc false
+  @spec parse_http_date(String.t()) :: :calendar.datetime()
+  def parse_http_date(date_string) do
     # Try RFC 1123 format: "Sun, 06 Nov 1994 08:49:37 GMT"
     case parse_rfc1123(date_string) do
       {:ok, datetime} -> datetime

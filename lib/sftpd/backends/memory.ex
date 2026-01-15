@@ -33,7 +33,17 @@ defmodule Sftpd.Backends.Memory do
 
   alias Sftpd.Backend
 
+  # Marker file used to represent empty directories (matching S3 convention)
+  @keep_marker ".keep"
+
+  @typedoc "Memory backend state containing the Agent process"
+  @type state :: %{agent: pid()}
+
+  @typedoc "File data stored in memory"
+  @type file_data :: %{content: binary(), mtime: NaiveDateTime.t()}
+
   @impl true
+  @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     initial_files = Keyword.get(opts, :files, %{})
     {:ok, agent} = Agent.start_link(fn -> initial_files end)
@@ -41,6 +51,7 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec list_dir(Backend.path(), state()) :: {:ok, [charlist()]}
   def list_dir(path, %{agent: agent}) do
     files = Agent.get(agent, & &1)
     prefix = normalize_prefix(path)
@@ -51,7 +62,7 @@ defmodule Sftpd.Backends.Memory do
       |> Enum.filter(&String.starts_with?(&1, prefix))
       |> Enum.map(&trim_prefix(&1, prefix))
       |> Enum.map(&(String.split(&1, "/") |> List.first()))
-      |> Enum.reject(&(&1 in ["", ".keep"]))
+      |> Enum.reject(&(&1 in ["", @keep_marker]))
       |> Enum.uniq()
       |> Enum.map(&to_charlist/1)
 
@@ -62,6 +73,7 @@ defmodule Sftpd.Backends.Memory do
   defp trim_prefix(str, prefix), do: String.trim_leading(str, prefix)
 
   @impl true
+  @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
   def file_info(path, %{agent: agent}) do
     if root_path?(path) do
       {:ok, Backend.directory_info()}
@@ -87,8 +99,9 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec make_dir(Backend.path(), state()) :: :ok
   def make_dir(path, %{agent: agent}) do
-    key = Backend.normalize_path(path) <> "/.keep"
+    key = Backend.normalize_path(path) <> "/" <> @keep_marker
 
     Agent.update(agent, fn files ->
       Map.put(files, key, %{content: "", mtime: NaiveDateTime.utc_now()})
@@ -98,8 +111,9 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec del_dir(Backend.path(), state()) :: :ok
   def del_dir(path, %{agent: agent}) do
-    key = Backend.normalize_path(path) <> "/.keep"
+    key = Backend.normalize_path(path) <> "/" <> @keep_marker
 
     Agent.update(agent, fn files ->
       Map.delete(files, key)
@@ -109,6 +123,7 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec delete(Backend.path(), state()) :: :ok
   def delete(path, %{agent: agent}) do
     key = Backend.normalize_path(path)
 
@@ -120,6 +135,7 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec rename(Backend.path(), Backend.path(), state()) :: :ok
   def rename(src, dst, %{agent: agent}) do
     src_key = Backend.normalize_path(src)
     dst_key = Backend.normalize_path(dst)
@@ -135,6 +151,7 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec read_file(Backend.path(), state()) :: {:ok, binary()} | {:error, :enoent}
   def read_file(path, %{agent: agent}) do
     key = Backend.normalize_path(path)
     files = Agent.get(agent, & &1)
@@ -146,6 +163,7 @@ defmodule Sftpd.Backends.Memory do
   end
 
   @impl true
+  @spec write_file(Backend.path(), binary(), state()) :: :ok
   def write_file(path, content, %{agent: agent}) do
     key = Backend.normalize_path(path)
 
