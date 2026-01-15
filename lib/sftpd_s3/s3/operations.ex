@@ -13,7 +13,8 @@ defmodule SftpdS3.S3.Operations do
 
   @spec make_dir(charlist, String.t()) :: :ok | {:error, :eexists}
   def make_dir(path, bucket) do
-    req = ExAws.S3.put_object(bucket, path ++ "/.keep", "")
+    key = (path |> to_string()) <> "/.keep"
+    req = ExAws.S3.put_object(bucket, key, "")
 
     case ExAws.request(req) do
       {:ok, _} ->
@@ -26,7 +27,8 @@ defmodule SftpdS3.S3.Operations do
 
   @spec del_dir(charlist, String.t()) :: :ok | {:error, :enoent}
   def del_dir(path, bucket) do
-    req = ExAws.S3.delete_object(bucket, path ++ "/.keep")
+    key = (path |> to_string()) <> "/.keep"
+    req = ExAws.S3.delete_object(bucket, key)
 
     case ExAws.request(req) do
       {:ok, _} ->
@@ -85,14 +87,26 @@ defmodule SftpdS3.S3.Operations do
   end
 
   @spec read_link_info(charlist, String.t()) ::
-          {:ok, tuple}
+          {:ok, tuple} | {:error, :enoent}
 
-  def read_link_info(path, _bucket) when path in [~c"/", ~c"/.", ~c"..", ~c"."] do
+  def read_link_info(path, _bucket) when path in [~c"/", ~c"/.", ~c"/..", ~c"..", ~c"."] do
     {:ok, fake_directory_info()}
   end
 
   def read_link_info(path, bucket) do
-    head_object = ExAws.S3.head_object(bucket, path)
+    path_str = to_string(path)
+
+    # Handle paths ending in /. or /.. (e.g., /foldertest/. or /foldertest/..)
+    if String.ends_with?(path_str, "/.") or String.ends_with?(path_str, "/..") do
+      {:ok, fake_directory_info()}
+    else
+      read_link_info_from_s3(path, bucket)
+    end
+  end
+
+  defp read_link_info_from_s3(path, bucket) do
+    key = path |> to_string()
+    head_object = ExAws.S3.head_object(bucket, key)
 
     case ExAws.request(head_object) do
       {:ok, %{headers: headers}} ->
@@ -144,21 +158,56 @@ defmodule SftpdS3.S3.Operations do
          }}
 
       {:error, _err} ->
-        {:ok, fake_directory_info()}
+        # Check if it might be a directory (has objects with this prefix)
+        prefix = (key |> String.trim_leading("/")) <> "/"
+        list_req = ExAws.S3.list_objects_v2(bucket, prefix: prefix, max_keys: 1)
+
+        case ExAws.request(list_req) do
+          {:ok, %{body: %{contents: [_ | _]}}} ->
+            # Has contents with this prefix, so it's a directory
+            {:ok, fake_directory_info()}
+
+          _ ->
+            # Not a file and not a directory with contents
+            {:error, :enoent}
+        end
     end
   end
 
-  @spec write(charlist(), binary, pos_integer, binary, String.t()) :: :ok | {:error, :einval}
-  def write(path, upload_id, part, data, bucket) do
-    req = ExAws.S3.upload_part(bucket, upload_id, path |> to_string(), part, data)
+  @spec delete(charlist, String.t()) :: :ok | {:error, :enoent}
+  def delete(path, bucket) do
+    key = path |> to_string()
+    req = ExAws.S3.delete_object(bucket, key)
 
     case ExAws.request(req) do
       {:ok, _} ->
         :ok
 
-      {:error, err} ->
-        IO.inspect(err, label: "write failed")
-        {:error, :einval}
+      {:error, _} ->
+        {:error, :enoent}
+    end
+  end
+
+  @spec rename(charlist, charlist, String.t()) :: :ok | {:error, atom}
+  def rename(src, dst, bucket) do
+    src_key = src |> to_string()
+    dst_key = dst |> to_string()
+
+    # Copy the object to the new location
+    copy_req = ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)
+
+    case ExAws.request(copy_req) do
+      {:ok, _} ->
+        # Delete the old object
+        delete_req = ExAws.S3.delete_object(bucket, src_key)
+
+        case ExAws.request(delete_req) do
+          {:ok, _} -> :ok
+          {:error, _} -> {:error, :enoent}
+        end
+
+      {:error, _} ->
+        {:error, :enoent}
     end
   end
 

@@ -17,9 +17,9 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def delete(path, state) do
+  def delete(path, %{bucket: bucket} = state) do
     dbg(path, label: "delete")
-    {{:error, :eperm}, state}
+    {Operations.delete(path, bucket), state}
   end
 
   @impl true
@@ -48,6 +48,9 @@ defmodule SftpdS3.S3.FileHandler do
         {true, state}
 
       {:ok, {:file_info, _, :regular, _, _, _, _, _, _, _, _, _, _, _}} ->
+        {false, state}
+
+      {:error, _} ->
         {false, state}
     end
   end
@@ -95,19 +98,28 @@ defmodule SftpdS3.S3.FileHandler do
   @impl true
   def open(path, [:binary, :read], %{bucket: bucket} = state) do
     dbg(path, label: "open for read")
-    {IODevice.start_link(%{path: path, bucket: bucket}), state}
+    {IODevice.start_link(%{path: path, bucket: bucket, mode: :read}), state}
   end
 
   def open(path, [:binary, :write], %{bucket: bucket} = state) do
     dbg(path, label: "open for write")
-    {IODevice.start_link(%{path: path, bucket: bucket}), state}
+    {IODevice.start_link(%{path: path, bucket: bucket, mode: :write}), state}
   end
 
-  def open(path, modes, state) do
-    dbg(path, label: "open")
-    dbg(modes, label: "open")
+  def open(path, modes, %{bucket: bucket} = state) do
+    dbg(path, label: "open with modes")
+    dbg(modes, label: "modes")
 
-    {{:error, :einval}, state}
+    cond do
+      :write in modes ->
+        {IODevice.start_link(%{path: path, bucket: bucket, mode: :write}), state}
+
+      :read in modes ->
+        {IODevice.start_link(%{path: path, bucket: bucket, mode: :read}), state}
+
+      true ->
+        {{:error, :einval}, state}
+    end
   end
 
   @impl true
@@ -137,9 +149,9 @@ defmodule SftpdS3.S3.FileHandler do
   end
 
   @impl true
-  def rename(src, dst, state) do
+  def rename(src, dst, %{bucket: bucket} = state) do
     dbg({src, dst}, label: "rename")
-    {:file.rename(src, dst), state}
+    {Operations.rename(src, dst, bucket), state}
   end
 
   @impl true

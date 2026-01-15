@@ -85,9 +85,22 @@ defmodule SftpdS3Test do
 
       assert Enum.sort(listing) == Enum.sort([~c".", ~c"..", ~c"foldertest"])
 
-      assert {:ok, "0"} = :ssh_sftp.open(channel_ref, ~c"/foldertest/15/assets.csv", [:write])
+      # Create the directory first
+      assert :ok = :ssh_sftp.make_dir(channel_ref, ~c"/foldertest/15")
 
-      assert false = :ssh_sftp.write(channel_ref, "0", "hello")
+      # Now open a file for writing
+      assert {:ok, handle} = :ssh_sftp.open(channel_ref, ~c"/foldertest/15/assets.csv", [:write])
+
+      # Write some data
+      assert :ok = :ssh_sftp.write(channel_ref, handle, "hello world")
+
+      # Close the file
+      assert :ok = :ssh_sftp.close(channel_ref, handle)
+
+      # Verify the file was created and can be read back
+      assert {:ok, handle2} = :ssh_sftp.open(channel_ref, ~c"/foldertest/15/assets.csv", [:read])
+      assert {:ok, ~c"hello world"} = :ssh_sftp.read(channel_ref, handle2, 11)
+      assert :ok = :ssh_sftp.close(channel_ref, handle2)
     end
   end
 
