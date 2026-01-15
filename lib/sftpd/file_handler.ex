@@ -91,14 +91,16 @@ defmodule Sftpd.FileHandler do
   end
 
   @impl true
-  @spec read_link(charlist(), state()) :: {{:error, :enotsup}, state()}
+  @spec read_link(charlist(), state()) :: {{:error, :einval}, state()}
   def read_link(_path, state) do
-    {{:error, :enotsup}, state}
+    # Return einval to indicate path exists but is not a symlink
+    # (we don't support symlinks, so nothing is ever a symlink)
+    {{:error, :einval}, state}
   end
 
   @impl true
   @spec read_link_info(charlist(), state()) :: {{:ok, Backend.file_info()} | {:error, atom()}, state()}
-  def read_link_info(path, state) when path in [~c"/", ~c"/.", ~c"/..", ~c"..", ~c"."] do
+  def read_link_info(path, state) when path in [~c"/", ~c"/.", ~c"/..", ~c"..", ~c".", ~c""] do
     {{:ok, Backend.directory_info()}, state}
   end
 

@@ -1,9 +1,9 @@
-defmodule Sftpd.Test.SSHKeys do
+defmodule Sftpd.SSHKeys do
   @moduledoc """
-  Generates SSH host keys dynamically for testing.
+  Generates SSH host keys dynamically.
 
   Creates a temporary directory with SSH host keys that can be used
-  as the system_dir for SFTP server tests.
+  as the system_dir for SFTP servers. Useful for development and testing.
   """
 
   @doc """
@@ -11,14 +11,18 @@ defmodule Sftpd.Test.SSHKeys do
 
   Returns the path to the directory containing the generated keys.
   The directory and keys will be automatically cleaned up when the
-  test process exits.
+  calling process exits.
 
   ## Example
 
-      setup do
-        system_dir = Sftpd.Test.SSHKeys.generate_system_dir()
-        %{system_dir: system_dir}
-      end
+      iex> system_dir = Sftpd.SSHKeys.generate_system_dir()
+      iex> Sftpd.start_server(
+      ...>   port: 2222,
+      ...>   backend: Sftpd.Backends.Memory,
+      ...>   backend_opts: [],
+      ...>   users: [{"dev", "dev"}],
+      ...>   system_dir: system_dir
+      ...> )
   """
   @spec generate_system_dir() :: String.t()
   def generate_system_dir do
@@ -30,7 +34,7 @@ defmodule Sftpd.Test.SSHKeys do
   defp create_temp_dir do
     timestamp = System.system_time(:millisecond)
     random = :rand.uniform(1_000_000)
-    dir = Path.join(System.tmp_dir!(), "sftpd_test_keys_#{timestamp}_#{random}")
+    dir = Path.join(System.tmp_dir!(), "sftpd_keys_#{timestamp}_#{random}")
     File.mkdir_p!(dir)
 
     # Clean up when calling process exits

@@ -176,9 +176,9 @@ defmodule Sftpd.Backends.Memory do
 
   # Helpers
 
-  defp root_path?(path), do: path in [~c"/", ~c"/."]
+  defp root_path?(path), do: path in [~c"/", ~c"/.", ~c".", ~c""]
 
-  defp normalize_prefix(path) when path in [~c"/", ~c"/."], do: ""
+  defp normalize_prefix(path) when path in [~c"/", ~c"/.", ~c".", ~c""], do: ""
 
   defp normalize_prefix(path) do
     Backend.normalize_path(path) <> "/"

@@ -76,6 +76,30 @@ defmodule Sftpd.Backends.MemoryTest do
     end
   end
 
+  describe "root path variants" do
+    test "list_dir with '.' returns root", %{state: state} do
+      Memory.write_file(~c"/test.txt", "hello", state)
+      assert {:ok, listing} = Memory.list_dir(~c".", state)
+      assert ~c"test.txt" in listing
+    end
+
+    test "list_dir with empty path returns root", %{state: state} do
+      Memory.write_file(~c"/test.txt", "hello", state)
+      assert {:ok, listing} = Memory.list_dir(~c"", state)
+      assert ~c"test.txt" in listing
+    end
+
+    test "file_info with '.' returns directory", %{state: state} do
+      assert {:ok, {:file_info, _, :directory, _, _, _, _, _, _, _, _, _, _, _}} =
+               Memory.file_info(~c".", state)
+    end
+
+    test "file_info with empty path returns directory", %{state: state} do
+      assert {:ok, {:file_info, _, :directory, _, _, _, _, _, _, _, _, _, _, _}} =
+               Memory.file_info(~c"", state)
+    end
+  end
+
   describe "file_info" do
     test "root is always a directory", %{state: state} do
       assert {:ok, {:file_info, _, :directory, _, _, _, _, _, _, _, _, _, _, _}} =
