@@ -55,22 +55,22 @@ defmodule Sftpd.MixProject do
   defp package do
     [
       maintainers: ["Michael Christensen"],
-      licenses: ["MIT"],
+      licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => @source_url
       },
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
     ]
   end
 
   defp docs do
     [
       main: "Sftpd",
-      extras: ["README.md", "CHANGELOG.md"],
+      extras: ["README.md"],
       source_ref: "v#{@version}",
       groups_for_modules: [
         Core: [Sftpd, Sftpd.Backend],
-        Backends: [Sftpd.Backends.S3],
+        Backends: [Sftpd.Backends.S3, Sftpd.Backends.Memory],
         Internal: [Sftpd.FileHandler, Sftpd.IODevice],
         Legacy: [SftpdS3]
       ]
