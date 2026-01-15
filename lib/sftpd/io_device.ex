@@ -93,7 +93,8 @@ defmodule Sftpd.IODevice do
   end
 
   @impl GenServer
-  def terminate(_reason, %{mode: :write, buffer: buffer} = state) when byte_size(buffer) > 0 do
+  def terminate(_reason, %{mode: :write} = state) do
+    # Always upload on terminate for write mode (even empty files)
     upload_buffer(state)
   end
 

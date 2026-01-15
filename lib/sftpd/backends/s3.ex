@@ -175,7 +175,8 @@ defmodule Sftpd.Backends.S3 do
 
     case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
       {:ok, _} -> :ok
-      {:error, _} -> {:error, :enoent}
+      {:error, {:http_error, 404, _}} -> {:error, :enoent}
+      {:error, _} -> {:error, :eio}
     end
   end
 
@@ -183,9 +184,10 @@ defmodule Sftpd.Backends.S3 do
   def delete(path, %{bucket: bucket, prefix: global_prefix}) do
     key = global_prefix <> Backend.normalize_path(path)
 
+    # S3 delete is idempotent - succeeds even if object doesn't exist
     case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
       {:ok, _} -> :ok
-      {:error, _} -> {:error, :enoent}
+      {:error, reason} -> {:error, reason}
     end
   end
 

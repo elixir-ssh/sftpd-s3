@@ -379,7 +379,7 @@ defmodule SftpdS3Test do
         {:ok, ref}
 
       {:error, :eaddrinuse} ->
-        :ok
+        flunk("Port #{@port} already in use - cannot start SSH server")
     end
   end
 end
