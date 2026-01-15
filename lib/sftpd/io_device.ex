@@ -1,56 +1,48 @@
-defmodule SftpdS3.S3.IODevice do
-  use GenServer
+defmodule Sftpd.IODevice do
+  @moduledoc """
+  GenServer that manages file handles for SFTP read/write operations.
 
-  alias SftpdS3.S3.Operations
+  This module buffers reads and writes, delegating actual storage operations
+  to the configured backend.
+  """
+
+  use GenServer
 
   require Logger
 
   @doc """
-  Starts an IODevice process (not linked to caller).
+  Start an IODevice process (not linked to caller).
 
   Uses GenServer.start/2 instead of start_link to avoid crashing the
   SFTP channel when the IODevice terminates normally after file close.
   """
-  @spec start(map) :: GenServer.on_start()
+  @spec start(map()) :: GenServer.on_start()
   def start(opts) do
     GenServer.start(__MODULE__, opts)
   end
 
   @impl GenServer
-  @spec init(%{:bucket => String.t(), :path => charlist(), optional(:mode) => :read | :write}) ::
-          {:ok, %{bucket: any, path: any, mode: :read | :write}, {:continue, :open}}
-  def init(%{path: path, bucket: bucket, mode: mode}) do
-    {:ok, %{path: path, bucket: bucket, mode: mode}, {:continue, :open}}
+  def init(%{path: path, mode: mode, backend: backend, backend_state: backend_state}) do
+    {:ok, %{path: path, mode: mode, backend: backend, backend_state: backend_state},
+     {:continue, :open}}
   end
 
   @impl GenServer
-  def handle_continue(:open, %{path: path, bucket: bucket, mode: :read}) do
-    # Eagerly load file content into memory for reliable seeking/reading
-    content =
-      Operations.read_stream(path, bucket)
-      |> Enum.join()
+  def handle_continue(
+        :open,
+        %{path: path, mode: :read, backend: backend, backend_state: backend_state} = state
+      ) do
+    case backend.read_file(path, backend_state) do
+      {:ok, content} ->
+        {:noreply, Map.merge(state, %{content: content, size: byte_size(content), position: 0})}
 
-    {:noreply,
-     %{
-       mode: :read,
-       position: 0,
-       content: content,
-       size: byte_size(content),
-       path: path,
-       bucket: bucket
-     }}
+      {:error, _reason} ->
+        {:noreply, Map.merge(state, %{content: <<>>, size: 0, position: 0})}
+    end
   end
 
-  def handle_continue(:open, %{path: path, bucket: bucket, mode: :write}) do
-    # Buffer writes in memory, upload on close
-    # This avoids S3's 5MB minimum part size requirement for small files
-    {:noreply,
-     %{
-       mode: :write,
-       path: path,
-       bucket: bucket,
-       buffer: <<>>
-     }}
+  def handle_continue(:open, %{mode: :write} = state) do
+    {:noreply, Map.put(state, :buffer, <<>>)}
   end
 
   @impl GenServer
@@ -109,16 +101,19 @@ defmodule SftpdS3.S3.IODevice do
     :ok
   end
 
-  defp upload_buffer(%{path: path, bucket: bucket, buffer: buffer}) do
-    key = Operations.to_s3_key(path)
-
-    case ExAws.request(ExAws.S3.put_object(bucket, key, buffer)) do
-      {:ok, _} ->
+  defp upload_buffer(%{
+         path: path,
+         buffer: buffer,
+         backend: backend,
+         backend_state: backend_state
+       }) do
+    case backend.write_file(path, buffer, backend_state) do
+      :ok ->
         :ok
 
-      {:error, err} ->
-        Logger.error("Failed to upload file: #{inspect(err)}")
-        {:error, :einval}
+      {:error, reason} ->
+        Logger.error("Failed to write file: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 end

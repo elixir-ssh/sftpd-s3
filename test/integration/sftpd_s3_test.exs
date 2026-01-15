@@ -19,7 +19,7 @@ defmodule SftpdS3Test do
       ])
 
     file = ExAws.S3.Upload.stream_file(local_path)
-    bucket = Application.get_env(:sftpd_s3, :bucket)
+    bucket = Application.get_env(:sftpd, :bucket)
 
     ExAws.S3.put_bucket(bucket, "us-west-2") |> ExAws.request()
 

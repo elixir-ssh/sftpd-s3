@@ -1,52 +1,53 @@
 defmodule SftpdS3 do
   @moduledoc """
-  Documentation for `SftpdS3`.
+  Legacy module for backwards compatibility.
+
+  This module is deprecated. Please use `Sftpd` instead.
+
+  ## Migration
+
+  Replace:
+
+      SftpdS3.start_server(port)
+
+  With:
+
+      Sftpd.start_server(
+        port: port,
+        backend: Sftpd.Backends.S3,
+        backend_opts: [bucket: "your-bucket"],
+        users: [{"user", "password"}],
+        system_dir: "path/to/ssh_keys"
+      )
   """
 
   @doc """
-  Start a new test SFTP server.
+  Start a test SFTP server with default settings.
 
-  This should be replaced with a child_spec.
+  Deprecated: Use `Sftpd.start_server/1` instead.
 
   ## Examples
 
       iex> {:ok, _pid} = SftpdS3.start_server(:rand.uniform(65_535))
   """
-
-  def start_server(port \\ 22)
-
-  @spec start_server(non_neg_integer) :: any
-  def start_server(port) do
-    :ssh.daemon(port, [
-      {:max_sessions, 1},
-      {:user_passwords, [{~c"user", ~c"password"}]},
-      {:system_dir, ~c"test/fixtures/ssh_keys"},
-      {:subsystems,
-       [
-         :ssh_sftpd.subsystem_spec(
-           cwd: ~c"/",
-           root: ~c"/",
-           file_handler: {
-             SftpdS3.S3.FileHandler,
-             %{bucket: Application.get_env(:sftpd_s3, :bucket)}
-           }
-         )
-       ]}
-    ])
+  @spec start_server(non_neg_integer()) :: {:ok, :ssh.daemon_ref()} | {:error, term()}
+  def start_server(port \\ 22) do
+    Sftpd.start_server(
+      port: port,
+      backend: Sftpd.Backends.S3,
+      backend_opts: [bucket: Application.get_env(:sftpd, :bucket)],
+      users: [{"user", "password"}],
+      system_dir: "test/fixtures/ssh_keys"
+    )
   end
 
   @doc """
-    Stop a SSH daemon.
+  Stop an SFTP server.
 
-    This stops the whole daemon.
-    You probably want to roll your own thing that removes the sftp handler instead.
-
-    ## Examples
-
-        iex> {:ok, pid} = SftpdS3.start_server(:rand.uniform(65_535))
-        iex> SftpdS3.stop_server(pid)
+  Deprecated: Use `Sftpd.stop_server/1` instead.
   """
-  def stop_server(pid) do
-    :ssh.stop_daemon(pid)
+  @spec stop_server(:ssh.daemon_ref()) :: :ok | {:error, term()}
+  def stop_server(ref) do
+    Sftpd.stop_server(ref)
   end
 end
