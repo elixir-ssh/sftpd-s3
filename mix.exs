@@ -49,6 +49,9 @@ defmodule Sftpd.MixProject do
 
   defp aliases do
     [
+      # Use --no-start to prevent automatic application startup. Applications are
+      # started explicitly in test_helper.exs to control the startup order and
+      # avoid issues with SSH daemon initialization during test discovery.
       test: ["test --no-start"]
     ]
   end
