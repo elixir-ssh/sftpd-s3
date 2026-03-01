@@ -146,6 +146,7 @@ defmodule Sftpd.IODeviceTest do
       send(pid, {:file_request, self(), make_ref(), :close})
 
       assert_receive {:written, "hello world"}, 1000
+      refute_receive {:written, _}, 200
     end
 
     test "uploads buffer on terminate" do

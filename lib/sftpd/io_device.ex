@@ -10,6 +10,8 @@ defmodule Sftpd.IODevice do
 
   require Logger
 
+  alias Sftpd.Backend
+
   @doc """
   Start an IODevice process (not linked to caller).
 
@@ -32,7 +34,7 @@ defmodule Sftpd.IODevice do
         :open,
         %{path: path, mode: :read, backend: backend, backend_state: backend_state} = state
       ) do
-    case backend.read_file(path, backend_state) do
+    case Backend.call(backend, :read_file, [path, backend_state]) do
       {:ok, content} ->
         {:noreply, Map.merge(state, %{content: content, size: byte_size(content), position: 0})}
 
@@ -43,10 +45,10 @@ defmodule Sftpd.IODevice do
   end
 
   def handle_continue(:open, %{mode: :write} = state) do
-    # Initialize empty buffer to accumulate writes. Content is uploaded to the
+    # Initialize iolist buffer to accumulate writes. Content is uploaded to the
     # backend on close/terminate, allowing small writes to be batched into a
     # single S3 upload (S3 multipart requires minimum 5MB per part).
-    {:noreply, Map.put(state, :buffer, <<>>)}
+    {:noreply, Map.put(state, :buffer, [])}
   end
 
   @impl GenServer
@@ -83,15 +85,10 @@ defmodule Sftpd.IODevice do
   end
 
   def handle_call({:write, data}, _from, %{mode: :write, buffer: buffer} = state) do
-    {:reply, :ok, %{state | buffer: buffer <> IO.iodata_to_binary(data)}}
+    {:reply, :ok, %{state | buffer: [buffer, data]}}
   end
 
   @impl GenServer
-  def handle_info({:file_request, _, _ref, :close}, %{mode: :write} = state) do
-    upload_buffer(state)
-    {:stop, :normal, state}
-  end
-
   def handle_info({:file_request, _, _ref, :close}, state) do
     {:stop, :normal, state}
   end
@@ -116,7 +113,7 @@ defmodule Sftpd.IODevice do
          backend: backend,
          backend_state: backend_state
        }) do
-    case backend.write_file(path, buffer, backend_state) do
+    case Backend.call(backend, :write_file, [path, IO.iodata_to_binary(buffer), backend_state]) do
       :ok ->
         :ok
 
