@@ -51,31 +51,32 @@ defmodule Sftpd.Backends.S3 do
   # Marker file used to represent empty directories in S3
   @keep_marker ".keep"
 
-  @typedoc "S3 backend state containing bucket name and optional prefix"
-  @type state :: %{bucket: String.t(), prefix: String.t()}
+  @typedoc "S3 backend state containing bucket name, optional prefix, and AWS client module"
+  @type state :: %{bucket: String.t(), prefix: String.t(), aws_client: module()}
 
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     bucket = Keyword.fetch!(opts, :bucket)
     prefix = Keyword.get(opts, :prefix, "")
-    {:ok, %{bucket: bucket, prefix: prefix}}
+    aws_client = Keyword.get(opts, :aws_client, ExAws)
+    {:ok, %{bucket: bucket, prefix: prefix, aws_client: aws_client}}
   end
 
   @impl true
   @spec list_dir(Backend.path(), state()) :: {:ok, [charlist()]} | {:error, atom()}
-  def list_dir(path, %{bucket: bucket, prefix: global_prefix}) do
+  def list_dir(path, %{bucket: bucket, prefix: global_prefix} = state) do
     if root_path?(path) do
-      list_root(bucket, global_prefix)
+      list_root(bucket, global_prefix, state)
     else
-      list_prefix(path, bucket, global_prefix)
+      list_prefix(path, bucket, global_prefix, state)
     end
   end
 
   defp root_path?(path), do: path in [~c"/", ~c"/."]
 
-  defp list_root(bucket, global_prefix) do
-    case ExAws.request(ExAws.S3.list_objects_v2(bucket, prefix: global_prefix)) do
+  defp list_root(bucket, global_prefix, state) do
+    case aws_request(state, ExAws.S3.list_objects_v2(bucket, prefix: global_prefix)) do
       {:ok, %{body: %{contents: contents}}} ->
         entries =
           contents
@@ -97,10 +98,10 @@ defmodule Sftpd.Backends.S3 do
   defp trim_prefix(str, ""), do: str
   defp trim_prefix(str, prefix), do: String.trim_leading(str, prefix)
 
-  defp list_prefix(path, bucket, global_prefix) do
+  defp list_prefix(path, bucket, global_prefix, state) do
     prefix = global_prefix <> Backend.normalize_path(path) <> "/"
 
-    case ExAws.request(ExAws.S3.list_objects_v2(bucket, prefix: prefix)) do
+    case aws_request(state, ExAws.S3.list_objects_v2(bucket, prefix: prefix)) do
       {:ok, %{body: %{contents: contents}}} ->
         entries =
           contents
@@ -126,30 +127,30 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
-  def file_info(path, %{bucket: bucket, prefix: global_prefix}) do
+  def file_info(path, %{bucket: bucket, prefix: global_prefix} = state) do
     # Root path is always a directory
     if root_path?(path) do
       {:ok, Backend.directory_info()}
     else
       key = global_prefix <> Backend.normalize_path(path)
 
-      case ExAws.request(ExAws.S3.head_object(bucket, key)) do
+      case aws_request(state, ExAws.S3.head_object(bucket, key)) do
         {:ok, %{headers: headers}} ->
           mtime = extract_mtime(headers)
           size = extract_size(headers)
           {:ok, Backend.file_info(size, mtime, :read_write)}
 
         {:error, _} ->
-          check_directory_exists(key, bucket)
+          check_directory_exists(key, bucket, state)
       end
     end
   end
 
-  defp check_directory_exists(key, bucket) do
+  defp check_directory_exists(key, bucket, state) do
     prefix = key <> "/"
     list_req = ExAws.S3.list_objects_v2(bucket, prefix: prefix, max_keys: 1)
 
-    case ExAws.request(list_req) do
+    case aws_request(state, list_req) do
       {:ok, %{body: %{contents: [_ | _]}}} ->
         {:ok, Backend.directory_info()}
 
@@ -174,10 +175,10 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec make_dir(Backend.path(), state()) :: :ok | {:error, atom()}
-  def make_dir(path, %{bucket: bucket, prefix: global_prefix}) do
+  def make_dir(path, %{bucket: bucket, prefix: global_prefix} = state) do
     key = global_prefix <> Backend.normalize_path(path) <> "/" <> @keep_marker
 
-    case ExAws.request(ExAws.S3.put_object(bucket, key, "")) do
+    case aws_request(state, ExAws.S3.put_object(bucket, key, "")) do
       {:ok, _} -> :ok
       {:error, _} -> {:error, :eacces}
     end
@@ -185,10 +186,10 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec del_dir(Backend.path(), state()) :: :ok | {:error, atom()}
-  def del_dir(path, %{bucket: bucket, prefix: global_prefix}) do
+  def del_dir(path, %{bucket: bucket, prefix: global_prefix} = state) do
     key = global_prefix <> Backend.normalize_path(path) <> "/" <> @keep_marker
 
-    case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
+    case aws_request(state, ExAws.S3.delete_object(bucket, key)) do
       {:ok, _} -> :ok
       {:error, {:http_error, 404, _}} -> {:error, :enoent}
       {:error, _} -> {:error, :eio}
@@ -197,11 +198,11 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec delete(Backend.path(), state()) :: :ok | {:error, term()}
-  def delete(path, %{bucket: bucket, prefix: global_prefix}) do
+  def delete(path, %{bucket: bucket, prefix: global_prefix} = state) do
     key = global_prefix <> Backend.normalize_path(path)
 
     # S3 delete is idempotent - succeeds even if object doesn't exist
-    case ExAws.request(ExAws.S3.delete_object(bucket, key)) do
+    case aws_request(state, ExAws.S3.delete_object(bucket, key)) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -209,12 +210,12 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec rename(Backend.path(), Backend.path(), state()) :: :ok | {:error, atom()}
-  def rename(src, dst, %{bucket: bucket, prefix: global_prefix}) do
+  def rename(src, dst, %{bucket: bucket, prefix: global_prefix} = state) do
     src_key = global_prefix <> Backend.normalize_path(src)
     dst_key = global_prefix <> Backend.normalize_path(dst)
 
-    with {:ok, _} <- ExAws.request(ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
-         {:ok, _} <- ExAws.request(ExAws.S3.delete_object(bucket, src_key)) do
+    with {:ok, _} <- aws_request(state, ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
+         {:ok, _} <- aws_request(state, ExAws.S3.delete_object(bucket, src_key)) do
       :ok
     else
       {:error, _} -> {:error, :enoent}
@@ -223,10 +224,10 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec read_file(Backend.path(), state()) :: {:ok, binary()} | {:error, atom()}
-  def read_file(path, %{bucket: bucket, prefix: global_prefix}) do
+  def read_file(path, %{bucket: bucket, prefix: global_prefix} = state) do
     key = global_prefix <> Backend.normalize_path(path)
 
-    case ExAws.request(ExAws.S3.get_object(bucket, key)) do
+    case aws_request(state, ExAws.S3.get_object(bucket, key)) do
       {:ok, %{body: body}} -> {:ok, body}
       {:error, {:http_error, 404, _}} -> {:error, :enoent}
       {:error, _} -> {:error, :eio}
@@ -235,13 +236,17 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec write_file(Backend.path(), binary(), state()) :: :ok | {:error, term()}
-  def write_file(path, content, %{bucket: bucket, prefix: global_prefix}) do
+  def write_file(path, content, %{bucket: bucket, prefix: global_prefix} = state) do
     key = global_prefix <> Backend.normalize_path(path)
 
-    case ExAws.request(ExAws.S3.put_object(bucket, key, content)) do
+    case aws_request(state, ExAws.S3.put_object(bucket, key, content)) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp aws_request(%{aws_client: client}, op) do
+    client.request(op)
   end
 
   # HTTP date parsing helpers

@@ -48,6 +48,11 @@ defmodule Sftpd.Backends.MemoryTest do
       assert {:error, :enoent} = Memory.read_file(~c"/old.txt", state)
       assert {:ok, "content"} = Memory.read_file(~c"/new.txt", state)
     end
+
+    test "rename non-existent source is a no-op", %{state: state} do
+      assert :ok = Memory.rename(~c"/nonexistent.txt", ~c"/dest.txt", state)
+      assert {:error, :enoent} = Memory.read_file(~c"/dest.txt", state)
+    end
   end
 
   describe "directory operations" do

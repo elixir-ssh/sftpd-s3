@@ -1,12 +1,16 @@
 defmodule Sftpd.IODeviceTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Sftpd.IODevice
 
   # Mock backend for testing
   defmodule MockBackend do
     def read_file(_path, %{content: content}), do: {:ok, content}
     def read_file(_path, %{error: reason}), do: {:error, reason}
+
+    def write_file(_path, _content, %{write_error: reason}), do: {:error, reason}
 
     def write_file(_path, content, state) do
       send(state.test_pid, {:written, content})
@@ -96,6 +100,33 @@ defmodule Sftpd.IODeviceTest do
       assert {:ok, 10} = GenServer.call(pid, {:position, {:bof, 10}})
       assert :eof = GenServer.call(pid, {:read, 1})
     end
+
+    test "close message stops read-mode process" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/test.txt",
+          mode: :read,
+          backend: MockBackend,
+          backend_state: %{content: "hello"}
+        })
+
+      ref = Process.monitor(pid)
+      send(pid, {:file_request, self(), make_ref(), :close})
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    end
+
+    test "terminate is clean for read mode" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/test.txt",
+          mode: :read,
+          backend: MockBackend,
+          backend_state: %{content: "hello"}
+        })
+
+      assert :ok = GenServer.stop(pid)
+      refute Process.alive?(pid)
+    end
   end
 
   describe "write mode" do
@@ -134,6 +165,23 @@ defmodule Sftpd.IODeviceTest do
       assert_receive {:written, "content"}, 1000
     end
 
+    test "handles upload error gracefully" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/output.txt",
+          mode: :write,
+          backend: MockBackend,
+          backend_state: %{write_error: :eacces}
+        })
+
+      log =
+        capture_log(fn ->
+          GenServer.stop(pid)
+        end)
+
+      assert log =~ "Failed to write file"
+    end
+
     test "position bof always returns 0 in write mode" do
       {:ok, pid} =
         IODevice.start(%{
@@ -160,6 +208,24 @@ defmodule Sftpd.IODeviceTest do
       GenServer.stop(pid)
 
       assert_receive {:written, "abcde"}, 1000
+    end
+  end
+
+  describe "handle_info catch-all" do
+    test "ignores unknown messages and stays alive" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/test.txt",
+          mode: :read,
+          backend: MockBackend,
+          backend_state: %{content: "hello"}
+        })
+
+      send(pid, :unknown_message)
+      send(pid, {:some, :other, :message})
+
+      # Process should still be alive and responsive
+      assert {:ok, "hello"} = GenServer.call(pid, {:read, 5})
     end
   end
 end
