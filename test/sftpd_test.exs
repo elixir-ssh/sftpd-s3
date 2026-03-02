@@ -159,6 +159,21 @@ defmodule SftpdTest do
     end
   end
 
+  describe "init_backend error handling" do
+    defmodule FailingBackend do
+      def init(_opts), do: {:error, :init_failed}
+    end
+
+    test "start_server propagates backend init error" do
+      assert {:error, :init_failed} =
+               Sftpd.start_server(
+                 backend: FailingBackend,
+                 system_dir: "/tmp",
+                 users: []
+               )
+    end
+  end
+
   describe "genserver backend" do
     setup do
       port = 10_000 + :rand.uniform(10_000)

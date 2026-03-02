@@ -83,40 +83,42 @@ defmodule Sftpd do
     system_dir = Keyword.fetch!(opts, :system_dir)
     max_sessions = Keyword.get(opts, :max_sessions, @default_max_sessions)
 
-    {backend, backend_state} = init_backend(backend, backend_opts)
-
     user_passwords =
       Enum.map(users, fn {user, pass} ->
         {to_charlist(user), to_charlist(pass)}
       end)
 
-    :ssh.daemon(port, [
-      {:max_sessions, max_sessions},
-      {:user_passwords, user_passwords},
-      {:system_dir, to_charlist(system_dir)},
-      {:subsystems,
-       [
-         :ssh_sftpd.subsystem_spec(
-           cwd: ~c"/",
-           root: ~c"/",
-           file_handler: {
-             Sftpd.FileHandler,
-             %{backend: backend, backend_state: backend_state}
-           }
-         )
-       ]}
-    ])
+    with {:ok, {backend, backend_state}} <- init_backend(backend, backend_opts) do
+      :ssh.daemon(port, [
+        {:max_sessions, max_sessions},
+        {:user_passwords, user_passwords},
+        {:system_dir, to_charlist(system_dir)},
+        {:subsystems,
+         [
+           :ssh_sftpd.subsystem_spec(
+             cwd: ~c"/",
+             root: ~c"/",
+             file_handler: {
+               Sftpd.FileHandler,
+               %{backend: backend, backend_state: backend_state}
+             }
+           )
+         ]}
+      ])
+    end
   end
 
   defp init_backend({:genserver, server}, _opts) do
     # Process-based backend - no init needed, process manages own state
-    {{:genserver, server}, nil}
+    {:ok, {{:genserver, server}, nil}}
   end
 
   defp init_backend(module, opts) when is_atom(module) do
     # Module-based backend - call init/1
-    {:ok, state} = module.init(opts)
-    {module, state}
+    case module.init(opts) do
+      {:ok, state} -> {:ok, {module, state}}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
