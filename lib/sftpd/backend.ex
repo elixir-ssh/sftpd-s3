@@ -180,6 +180,14 @@ defmodule Sftpd.Backend do
   end
 
   @doc """
+  Return true if the path refers to the root directory.
+
+  Handles all common root path representations used by SFTP clients.
+  """
+  @spec root_path?(path()) :: boolean()
+  def root_path?(path), do: path in [~c"/", ~c"/.", ~c"/..", ~c"..", ~c".", ~c""]
+
+  @doc """
   Normalize an SFTP path to a string without leading slash.
 
   Useful for backends that use string keys (like S3).

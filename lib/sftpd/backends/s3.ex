@@ -66,14 +66,12 @@ defmodule Sftpd.Backends.S3 do
   @impl true
   @spec list_dir(Backend.path(), state()) :: {:ok, [charlist()]} | {:error, atom()}
   def list_dir(path, %{bucket: bucket, prefix: global_prefix} = state) do
-    if root_path?(path) do
+    if Backend.root_path?(path) do
       list_root(bucket, global_prefix, state)
     else
       list_prefix(path, bucket, global_prefix, state)
     end
   end
-
-  defp root_path?(path), do: path in [~c"/", ~c"/."]
 
   defp list_root(bucket, global_prefix, state) do
     case aws_request(state, ExAws.S3.list_objects_v2(bucket, prefix: global_prefix)) do
@@ -129,7 +127,7 @@ defmodule Sftpd.Backends.S3 do
   @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
   def file_info(path, %{bucket: bucket, prefix: global_prefix} = state) do
     # Root path is always a directory
-    if root_path?(path) do
+    if Backend.root_path?(path) do
       {:ok, Backend.directory_info()}
     else
       key = global_prefix <> Backend.normalize_path(path)
@@ -214,7 +212,8 @@ defmodule Sftpd.Backends.S3 do
     src_key = global_prefix <> Backend.normalize_path(src)
     dst_key = global_prefix <> Backend.normalize_path(dst)
 
-    with {:ok, _} <- aws_request(state, ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
+    with {:ok, _} <-
+           aws_request(state, ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
          {:ok, _} <- aws_request(state, ExAws.S3.delete_object(bucket, src_key)) do
       :ok
     else

@@ -75,7 +75,7 @@ defmodule Sftpd.Backends.Memory do
   @impl true
   @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
   def file_info(path, %{agent: agent}) do
-    if root_path?(path) do
+    if Backend.root_path?(path) do
       {:ok, Backend.directory_info()}
     else
       key = Backend.normalize_path(path)
@@ -176,11 +176,7 @@ defmodule Sftpd.Backends.Memory do
 
   # Helpers
 
-  defp root_path?(path), do: path in [~c"/", ~c"/.", ~c".", ~c""]
-
-  defp normalize_prefix(path) when path in [~c"/", ~c"/.", ~c".", ~c""], do: ""
-
   defp normalize_prefix(path) do
-    Backend.normalize_path(path) <> "/"
+    if Backend.root_path?(path), do: "", else: Backend.normalize_path(path) <> "/"
   end
 end
