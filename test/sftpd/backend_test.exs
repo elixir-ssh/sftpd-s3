@@ -27,7 +27,7 @@ defmodule Sftpd.BackendTest do
 
       def start_link(reply), do: GenServer.start_link(__MODULE__, reply)
       def init(reply), do: {:ok, reply}
-      def handle_call({:list_dir, _path, _state}, _from, reply), do: {:reply, reply, reply}
+      def handle_call({:list_dir, _path}, _from, reply), do: {:reply, reply, reply}
     end
 
     test "dispatches to genserver process" do

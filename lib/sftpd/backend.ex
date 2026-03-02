@@ -193,7 +193,9 @@ defmodule Sftpd.Backend do
 
   @doc false
   def call({:genserver, server}, operation, args) do
-    GenServer.call(server, List.to_tuple([operation | args]))
+    # Drop the backend_state (last arg) — genserver manages its own state
+    call_args = List.delete_at(args, -1)
+    GenServer.call(server, List.to_tuple([operation | call_args]))
   end
 
   def call(module, operation, args) when is_atom(module) do

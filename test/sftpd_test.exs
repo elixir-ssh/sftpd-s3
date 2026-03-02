@@ -16,30 +16,30 @@ defmodule SftpdTest do
 
     def init(_), do: Memory.init([])
 
-    def handle_call({:list_dir, path, _state}, _from, mem_state),
+    def handle_call({:list_dir, path}, _from, mem_state),
       do: {:reply, Memory.list_dir(path, mem_state), mem_state}
 
-    def handle_call({:file_info, path, _state}, _from, mem_state),
+    def handle_call({:file_info, path}, _from, mem_state),
       do: {:reply, Memory.file_info(path, mem_state), mem_state}
 
-    def handle_call({:make_dir, path, _state}, _from, mem_state) do
+    def handle_call({:make_dir, path}, _from, mem_state) do
       :ok = Memory.make_dir(path, mem_state)
       {:reply, :ok, mem_state}
     end
 
-    def handle_call({:del_dir, path, _state}, _from, mem_state),
+    def handle_call({:del_dir, path}, _from, mem_state),
       do: {:reply, Memory.del_dir(path, mem_state), mem_state}
 
-    def handle_call({:delete, path, _state}, _from, mem_state),
+    def handle_call({:delete, path}, _from, mem_state),
       do: {:reply, Memory.delete(path, mem_state), mem_state}
 
-    def handle_call({:rename, src, dst, _state}, _from, mem_state),
+    def handle_call({:rename, src, dst}, _from, mem_state),
       do: {:reply, Memory.rename(src, dst, mem_state), mem_state}
 
-    def handle_call({:read_file, path, _state}, _from, mem_state),
+    def handle_call({:read_file, path}, _from, mem_state),
       do: {:reply, Memory.read_file(path, mem_state), mem_state}
 
-    def handle_call({:write_file, path, content, _state}, _from, mem_state) do
+    def handle_call({:write_file, path, content}, _from, mem_state) do
       :ok = Memory.write_file(path, content, mem_state)
       {:reply, :ok, mem_state}
     end
@@ -195,6 +195,19 @@ defmodule SftpdTest do
       assert :ok = :ssh_sftp.make_dir(ch, ~c"/gsdir")
       assert {:ok, listing} = :ssh_sftp.list_dir(ch, ~c"/")
       assert ~c"gsdir" in listing
+    end
+
+    test "write and read file works", %{channel: ch} do
+      content = "genserver file content"
+
+      assert {:ok, handle} = :ssh_sftp.open(ch, ~c"/gs_file.txt", [:write])
+      assert :ok = :ssh_sftp.write(ch, handle, content)
+      assert :ok = :ssh_sftp.close(ch, handle)
+
+      assert {:ok, handle} = :ssh_sftp.open(ch, ~c"/gs_file.txt", [:read])
+      assert {:ok, read_content} = :ssh_sftp.read(ch, handle, byte_size(content))
+      assert to_string(read_content) == content
+      assert :ok = :ssh_sftp.close(ch, handle)
     end
   end
 end
