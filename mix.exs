@@ -36,13 +36,13 @@ defmodule Sftpd.MixProject do
 
   defp deps do
     [
-      # S3 backend dependencies (optional for users who only need S3)
-      {:ex_aws, "~> 2.0"},
-      {:ex_aws_s3, "~> 2.0"},
-      {:hackney, "~> 1.9"},
-      {:sweet_xml, "~> 0.6"},
-      {:jason, "~> 1.3"},
-      {:configparser_ex, "~> 4.0"},
+      # S3 backend dependencies (optional for users who only need other backends)
+      {:ex_aws, "~> 2.0", optional: true},
+      {:ex_aws_s3, "~> 2.0", optional: true},
+      {:hackney, "~> 1.9", optional: true},
+      {:sweet_xml, "~> 0.6", optional: true},
+      {:jason, "~> 1.3", optional: true},
+      {:configparser_ex, "~> 4.0", optional: true},
 
       # Dev/test dependencies
       {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
