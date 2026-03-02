@@ -28,7 +28,6 @@
               beamPackages.rebar
               beamPackages.rebar3
               beamPackages.rebar3-nix
-              pkgs.tailwindcss
               pkgs.git
               pkgs.gh
               pkgs.nodePackages.cspell
