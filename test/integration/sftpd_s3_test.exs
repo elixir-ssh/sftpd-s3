@@ -32,7 +32,12 @@ defmodule SftpdS3Test do
     ExAws.S3.upload(file, bucket, "foldertest/11/assets2.csv")
     |> ExAws.request!()
 
-    %{bucket: bucket, path: "foldertest/9/assets.csv", local_path: local_path, system_dir: system_dir}
+    %{
+      bucket: bucket,
+      path: "foldertest/9/assets.csv",
+      local_path: local_path,
+      system_dir: system_dir
+    }
   end
 
   describe "SFTP Server - Read Operations" do

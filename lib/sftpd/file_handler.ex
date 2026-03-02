@@ -99,7 +99,8 @@ defmodule Sftpd.FileHandler do
   end
 
   @impl true
-  @spec read_link_info(charlist(), state()) :: {{:ok, Backend.file_info()} | {:error, atom()}, state()}
+  @spec read_link_info(charlist(), state()) ::
+          {{:ok, Backend.file_info()} | {:error, atom()}, state()}
   def read_link_info(path, state) when path in [~c"/", ~c"/.", ~c"/..", ~c"..", ~c".", ~c""] do
     {{:ok, Backend.directory_info()}, state}
   end
@@ -142,13 +143,15 @@ defmodule Sftpd.FileHandler do
   end
 
   @impl true
-  @spec read(io_device(), non_neg_integer(), state()) :: {{:ok, binary()} | :eof | {:error, atom()}, state()}
+  @spec read(io_device(), non_neg_integer(), state()) ::
+          {{:ok, binary()} | :eof | {:error, atom()}, state()}
   def read(io_device, len, state) do
     {GenServer.call(io_device, {:read, len}), state}
   end
 
   @impl true
-  @spec read_file_info(charlist(), state()) :: {{:ok, Backend.file_info()} | {:error, atom()}, state()}
+  @spec read_file_info(charlist(), state()) ::
+          {{:ok, Backend.file_info()} | {:error, atom()}, state()}
   def read_file_info(path, state) do
     read_link_info(path, state)
   end
