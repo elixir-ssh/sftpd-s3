@@ -33,6 +33,7 @@ defmodule SftpdS3 do
   - `:password` - SFTP password (default: from config or "password")
   - `:bucket` - S3 bucket name (default: from config)
   """
+  @deprecated "Use Sftpd.start_server/1 instead"
   @spec start_server(non_neg_integer(), keyword()) :: {:ok, :ssh.daemon_ref()} | {:error, term()}
   def start_server(port \\ 22, opts \\ []) do
     system_dir = Keyword.fetch!(opts, :system_dir)
@@ -54,6 +55,7 @@ defmodule SftpdS3 do
 
   Deprecated: Use `Sftpd.stop_server/1` instead.
   """
+  @deprecated "Use Sftpd.stop_server/1 instead"
   @spec stop_server(:ssh.daemon_ref()) :: :ok | {:error, term()}
   def stop_server(ref) do
     Sftpd.stop_server(ref)
