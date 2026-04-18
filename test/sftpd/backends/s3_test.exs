@@ -288,6 +288,21 @@ defmodule Sftpd.Backends.S3Test do
       assert :eof = S3.read_file_range(~c"/file.txt", 0, 4, state)
     end
 
+    test "read_file_range accepts a 200 response only for offset zero within len", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{status_code: 200, body: "abc"}} end)
+      assert {:ok, "abc"} = S3.read_file_range(~c"/file.txt", 0, 4, state)
+    end
+
+    test "read_file_range rejects oversized 200 responses", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{status_code: 200, body: "abcde"}} end)
+      assert {:error, :eio} = S3.read_file_range(~c"/file.txt", 0, 4, state)
+    end
+
+    test "read_file_range rejects 200 responses for non-zero offsets", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{status_code: 200, body: "full-object"}} end)
+      assert {:error, :eio} = S3.read_file_range(~c"/file.txt", 5, 4, state)
+    end
+
     test "read_file_range returns eio for unexpected success statuses", %{state: state} do
       expect(MockExAws, :request, fn _op -> {:ok, %{status_code: 301, body: "redirect"}} end)
       assert {:error, :eio} = S3.read_file_range(~c"/file.txt", 0, 4, state)
@@ -323,8 +338,23 @@ defmodule Sftpd.Backends.S3Test do
       chunk = :binary.copy(<<1>>, @multipart_part_size + 3)
       assert {:ok, writer} = S3.write_chunk(writer, 0, chunk, state)
       assert writer.next_part_number == 2
-      assert writer.pending_buffer == :binary.copy(<<1>>, 3)
+      assert writer.pending_size == 3
+      assert :queue.to_list(writer.pending_chunks) == [:binary.copy(<<1>>, 3)]
       assert writer.uploaded_parts == [{1, "\"etag-1\""}]
+    end
+
+    test "write_chunk keeps small writes in queued buffers", %{state: state} do
+      expect(MockExAws, :request, fn op ->
+        assert op.http_method == :post
+        {:ok, %{body: %{upload_id: "upload-1"}}}
+      end)
+
+      assert {:ok, writer} = S3.begin_write(~c"/large.bin", state)
+      assert {:ok, writer} = S3.write_chunk(writer, 0, "abc", state)
+      assert {:ok, writer} = S3.write_chunk(writer, 3, ["de", ?f], state)
+
+      assert writer.pending_size == 6
+      assert :queue.to_list(writer.pending_chunks) == ["abc", "def"]
     end
 
     test "begin_write normalizes backend errors", %{state: state} do
@@ -339,7 +369,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: 5,
         next_part_number: 1,
-        pending_buffer: <<>>,
+        pending_chunks: :queue.new(),
+        pending_size: 0,
         uploaded_parts: []
       }
 
@@ -353,7 +384,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: 3,
         next_part_number: 1,
-        pending_buffer: "abc",
+        pending_chunks: :queue.from_list(["abc"]),
+        pending_size: 3,
         uploaded_parts: []
       }
 
@@ -379,7 +411,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: @multipart_part_size + 4,
         next_part_number: 2,
-        pending_buffer: "tail",
+        pending_chunks: :queue.from_list(["tail"]),
+        pending_size: 4,
         uploaded_parts: [{1, "\"etag-1\""}]
       }
 
@@ -408,7 +441,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: @multipart_part_size,
         next_part_number: 2,
-        pending_buffer: <<>>,
+        pending_chunks: :queue.new(),
+        pending_size: 0,
         uploaded_parts: [{1, "\"etag-1\""}]
       }
 
@@ -429,7 +463,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: @multipart_part_size + 4,
         next_part_number: 2,
-        pending_buffer: "tail",
+        pending_chunks: :queue.from_list(["tail"]),
+        pending_size: 4,
         uploaded_parts: [{1, "\"etag-1\""}]
       }
 
@@ -444,7 +479,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: 0,
         next_part_number: 1,
-        pending_buffer: <<>>,
+        pending_chunks: :queue.new(),
+        pending_size: 0,
         uploaded_parts: []
       }
 
@@ -459,7 +495,8 @@ defmodule Sftpd.Backends.S3Test do
         upload_id: "upload-1",
         next_offset: 0,
         next_part_number: 1,
-        pending_buffer: <<>>,
+        pending_chunks: :queue.new(),
+        pending_size: 0,
         uploaded_parts: []
       }
 

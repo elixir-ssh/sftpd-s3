@@ -24,7 +24,8 @@ defmodule Sftpd.Backends.S3 do
           upload_id: String.t(),
           next_offset: non_neg_integer(),
           next_part_number: pos_integer(),
-          pending_buffer: binary(),
+          pending_chunks: :queue.queue(binary()),
+          pending_size: non_neg_integer(),
           uploaded_parts: [{pos_integer(), binary()}]
         }
 
@@ -163,11 +164,7 @@ defmodule Sftpd.Backends.S3 do
 
     case aws_request(state, ExAws.S3.get_object(bucket, key, range: range)) do
       {:ok, %{body: body} = response} ->
-        case Map.get(response, :status_code, 200) do
-          status when status in [200, 206] and body == "" -> :eof
-          status when status in [200, 206] -> {:ok, body}
-          _ -> {:error, :eio}
-        end
+        normalize_range_response(offset, len, body, Map.get(response, :status_code, 200))
 
       {:error, {:http_error, 416, _}} ->
         :eof
@@ -191,7 +188,8 @@ defmodule Sftpd.Backends.S3 do
            upload_id: upload_id,
            next_offset: 0,
            next_part_number: 1,
-           pending_buffer: <<>>,
+           pending_chunks: :queue.new(),
+           pending_size: 0,
            uploaded_parts: []
          }}
 
@@ -209,12 +207,14 @@ defmodule Sftpd.Backends.S3 do
   end
 
   def write_chunk(writer, offset, chunk, state) do
-    buffer = writer.pending_buffer <> IO.iodata_to_binary(chunk)
+    chunk = IO.iodata_to_binary(chunk)
+    chunk_size = byte_size(chunk)
 
     writer = %{
       writer
-      | pending_buffer: buffer,
-        next_offset: offset + byte_size(buffer) - byte_size(writer.pending_buffer)
+      | pending_chunks: :queue.in(chunk, writer.pending_chunks),
+        pending_size: writer.pending_size + chunk_size,
+        next_offset: offset + chunk_size
     }
 
     flush_full_parts(writer, state)
@@ -252,23 +252,32 @@ defmodule Sftpd.Backends.S3 do
     end
   end
 
-  defp flush_full_parts(%{pending_buffer: buffer} = writer, _state)
-       when byte_size(buffer) < @multipart_part_size do
+  defp flush_full_parts(%{pending_size: size} = writer, _state)
+       when size < @multipart_part_size do
     {:ok, writer}
   end
 
-  defp flush_full_parts(%{pending_buffer: buffer} = writer, state) do
-    <<part::binary-size(@multipart_part_size), rest::binary>> = buffer
+  defp flush_full_parts(writer, state) do
+    {part, pending_chunks} = take_pending_bytes(writer.pending_chunks, @multipart_part_size)
+
+    writer = %{
+      writer
+      | pending_chunks: pending_chunks,
+        pending_size: writer.pending_size - @multipart_part_size
+    }
 
     with {:ok, writer} <- upload_part(writer, part, state) do
-      flush_full_parts(%{writer | pending_buffer: rest}, state)
+      flush_full_parts(writer, state)
     end
   end
 
-  defp maybe_upload_final_part(%{pending_buffer: <<>>} = writer, _state), do: {:ok, writer}
+  defp maybe_upload_final_part(%{pending_size: 0} = writer, _state), do: {:ok, writer}
 
   defp maybe_upload_final_part(writer, state) do
-    upload_part(writer, writer.pending_buffer, state)
+    {part, pending_chunks} = take_pending_bytes(writer.pending_chunks, writer.pending_size)
+
+    writer = %{writer | pending_chunks: pending_chunks, pending_size: 0}
+    upload_part(writer, part, state)
   end
 
   defp upload_part(writer, chunk, state) do
@@ -288,8 +297,7 @@ defmodule Sftpd.Backends.S3 do
            %{
              writer
              | next_part_number: writer.next_part_number + 1,
-               uploaded_parts: [{writer.next_part_number, etag} | writer.uploaded_parts],
-               pending_buffer: <<>>
+               uploaded_parts: [{writer.next_part_number, etag} | writer.uploaded_parts]
            }}
         end
 
@@ -311,9 +319,41 @@ defmodule Sftpd.Backends.S3 do
   end
 
   defp put_small_object(writer, state) do
-    case aws_request(state, ExAws.S3.put_object(writer.bucket, writer.key, writer.pending_buffer)) do
+    case aws_request(state, ExAws.S3.put_object(writer.bucket, writer.key, pending_body(writer))) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, normalize_error(reason)}
+    end
+  end
+
+  defp pending_body(%{pending_chunks: pending_chunks}) do
+    pending_chunks |> :queue.to_list() |> IO.iodata_to_binary()
+  end
+
+  defp take_pending_bytes(pending_chunks, bytes_to_take) do
+    take_pending_bytes(pending_chunks, bytes_to_take, [])
+  end
+
+  defp take_pending_bytes(pending_chunks, 0, acc) do
+    {acc |> Enum.reverse() |> IO.iodata_to_binary(), pending_chunks}
+  end
+
+  defp take_pending_bytes(pending_chunks, bytes_to_take, acc) do
+    case :queue.out(pending_chunks) do
+      {{:value, chunk}, pending_chunks} ->
+        chunk_size = byte_size(chunk)
+
+        cond do
+          chunk_size <= bytes_to_take ->
+            take_pending_bytes(pending_chunks, bytes_to_take - chunk_size, [chunk | acc])
+
+          true ->
+            <<part::binary-size(bytes_to_take), rest::binary>> = chunk
+            pending_chunks = :queue.in_r(rest, pending_chunks)
+            {IO.iodata_to_binary(Enum.reverse([part | acc])), pending_chunks}
+        end
+
+      {:empty, _pending_chunks} ->
+        {acc |> Enum.reverse() |> IO.iodata_to_binary(), :queue.new()}
     end
   end
 
@@ -465,6 +505,16 @@ defmodule Sftpd.Backends.S3 do
   defp normalize_error(:closed), do: :eio
   defp normalize_error(:socket_closed_remotely), do: :eio
   defp normalize_error(_reason), do: :eio
+
+  defp normalize_range_response(_offset, _len, "", status) when status in [200, 206], do: :eof
+
+  defp normalize_range_response(_offset, len, body, 206) when byte_size(body) <= len,
+    do: {:ok, body}
+
+  defp normalize_range_response(0, len, body, 200) when byte_size(body) <= len,
+    do: {:ok, body}
+
+  defp normalize_range_response(_offset, _len, _body, _status), do: {:error, :eio}
 
   @doc """
   Parse an HTTP date string (RFC 1123 format) into an Erlang datetime tuple.

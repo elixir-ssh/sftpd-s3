@@ -1,12 +1,29 @@
 defmodule Sftpd.FileHandlerTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Sftpd.FileHandler
 
   @state %{backend: nil, backend_state: nil}
 
   defmodule MockBackend do
     def read_file(_path, _state), do: {:ok, "content"}
+  end
+
+  defmodule SlowCloseDevice do
+    use GenServer
+
+    def start, do: GenServer.start(__MODULE__, [])
+
+    @impl true
+    def init(_args), do: {:ok, %{}}
+
+    @impl true
+    def handle_call(:close, _from, state) do
+      Process.sleep(50)
+      {:reply, :ok, state}
+    end
   end
 
   describe "make_symlink/3" do
@@ -48,6 +65,22 @@ defmodule Sftpd.FileHandlerTest do
       {{:ok, pid}, _state} = FileHandler.open(~c"/file.txt", [], state)
       assert Process.alive?(pid)
       GenServer.stop(pid)
+    end
+  end
+
+  describe "close/2" do
+    test "returns an error and terminates the device when close times out" do
+      {:ok, pid} = SlowCloseDevice.start()
+      ref = Process.monitor(pid)
+
+      log =
+        capture_log(fn ->
+          assert {{:error, :timeout}, _state} =
+                   FileHandler.close(pid, %{backend: nil, backend_state: nil, close_timeout: 10})
+        end)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1000
+      assert log =~ "Timed out waiting 10ms"
     end
   end
 end

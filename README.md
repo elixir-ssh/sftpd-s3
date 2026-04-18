@@ -104,6 +104,10 @@ close operations, even if final close-time flushing fails. Write errors are
 therefore surfaced during active writes whenever possible, while close-only
 failures are logged server-side.
 
+If you need to bound how long close-time finalization can block a session, pass
+`close_timeout: timeout_in_ms` to `Sftpd.start_server/1`. The default is
+`30_000`.
+
 ### Custom Backends
 
 Implement the `Sftpd.Backend` behaviour to create custom storage backends.

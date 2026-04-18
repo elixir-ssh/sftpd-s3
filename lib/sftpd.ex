@@ -31,6 +31,7 @@ defmodule Sftpd do
   - `:users` - List of `{username, password}` tuples for authentication
   - `:system_dir` - Directory containing SSH host keys (required)
   - `:max_sessions` - Maximum concurrent sessions (default: 10)
+  - `:close_timeout` - Timeout in milliseconds for finalizing file closes (default: 30000)
 
   ## Process-Based Backends
 
@@ -82,6 +83,7 @@ defmodule Sftpd do
     users = Keyword.get(opts, :users, [])
     system_dir = Keyword.fetch!(opts, :system_dir)
     max_sessions = Keyword.get(opts, :max_sessions, @default_max_sessions)
+    close_timeout = Keyword.get(opts, :close_timeout, 30_000)
 
     user_passwords =
       Enum.map(users, fn {user, pass} ->
@@ -100,7 +102,7 @@ defmodule Sftpd do
              root: ~c"/",
              file_handler: {
                Sftpd.FileHandler,
-               %{backend: backend, backend_state: backend_state}
+               %{backend: backend, backend_state: backend_state, close_timeout: close_timeout}
              }
            )
          ]}

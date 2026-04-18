@@ -17,12 +17,17 @@ defmodule Sftpd.FileHandler do
 
   @behaviour :ssh_sftpd_file_api
 
+  require Logger
+
   alias Sftpd.{Backend, IODevice}
+
+  @default_close_timeout 30_000
 
   @typedoc "File handler state containing backend module and its state"
   @type state :: %{
           backend: module() | {:genserver, GenServer.server()},
           backend_state: term(),
+          close_timeout: timeout(),
           cwd: charlist()
         }
 
@@ -32,7 +37,26 @@ defmodule Sftpd.FileHandler do
   @impl true
   @spec close(io_device(), state()) :: {:ok | {:error, term()}, state()}
   def close(io_device, state) do
-    {GenServer.call(io_device, :close, :infinity), state}
+    timeout = Map.get(state, :close_timeout, @default_close_timeout)
+
+    result =
+      try do
+        GenServer.call(io_device, :close, timeout)
+      catch
+        :exit, {:timeout, {GenServer, :call, _details}} ->
+          Logger.error(
+            "Timed out waiting #{timeout}ms for #{inspect(io_device)} to close; terminating IODevice"
+          )
+
+          if Process.alive?(io_device), do: Process.exit(io_device, :kill)
+          {:error, :timeout}
+
+        :exit, reason ->
+          Logger.error("IODevice close failed for #{inspect(io_device)}: #{inspect(reason)}")
+          {:error, :eio}
+      end
+
+    {result, state}
   end
 
   @impl true
