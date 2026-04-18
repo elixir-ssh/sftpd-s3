@@ -174,7 +174,11 @@ defmodule Sftpd.Backends.S3Test do
 
     test "non-existent path returns enoent", %{state: state} do
       expect(MockExAws, :request, fn _op -> {:error, :not_found} end)
-      expect(MockExAws, :request, fn _op -> {:ok, %{body: %{contents: [], common_prefixes: []}}} end)
+
+      expect(MockExAws, :request, fn _op ->
+        {:ok, %{body: %{contents: [], common_prefixes: []}}}
+      end)
+
       assert {:error, :enoent} = S3.file_info(~c"/missing", state)
     end
 
@@ -204,6 +208,11 @@ defmodule Sftpd.Backends.S3Test do
       expect(MockExAws, :request, fn _op -> {:error, {:http_error, 404, %{}}} end)
       assert {:error, :enoent} = S3.del_dir(~c"/dir", state)
     end
+
+    test "del_dir returns ok on success", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{}} end)
+      assert :ok = S3.del_dir(~c"/dir", state)
+    end
   end
 
   describe "file mutation with mock" do
@@ -215,6 +224,11 @@ defmodule Sftpd.Backends.S3Test do
     test "delete returns eacces on forbidden errors", %{state: state} do
       expect(MockExAws, :request, fn _op -> {:error, :forbidden} end)
       assert {:error, :eacces} = S3.delete(~c"/file.txt", state)
+    end
+
+    test "delete returns ok on success", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{}} end)
+      assert :ok = S3.delete(~c"/file.txt", state)
     end
 
     test "rename returns enoent when copy fails", %{state: state} do
@@ -231,6 +245,11 @@ defmodule Sftpd.Backends.S3Test do
     test "write_file normalizes unknown errors to eio", %{state: state} do
       expect(MockExAws, :request, fn _op -> {:error, :quota_exceeded} end)
       assert {:error, :eio} = S3.write_file(~c"/file.txt", "content", state)
+    end
+
+    test "write_file returns ok on success", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{}} end)
+      assert :ok = S3.write_file(~c"/file.txt", "content", state)
     end
   end
 
@@ -263,6 +282,21 @@ defmodule Sftpd.Backends.S3Test do
       expect(MockExAws, :request, fn _op -> {:error, {:http_error, 416, %{}}} end)
       assert :eof = S3.read_file_range(~c"/file.txt", 100, 4, state)
     end
+
+    test "read_file_range returns eof for empty successful bodies", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{status_code: 206, body: ""}} end)
+      assert :eof = S3.read_file_range(~c"/file.txt", 0, 4, state)
+    end
+
+    test "read_file_range returns eio for unexpected success statuses", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:ok, %{status_code: 301, body: "redirect"}} end)
+      assert {:error, :eio} = S3.read_file_range(~c"/file.txt", 0, 4, state)
+    end
+
+    test "read_file_range normalizes generic request errors", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:error, :closed} end)
+      assert {:error, :eio} = S3.read_file_range(~c"/file.txt", 0, 4, state)
+    end
   end
 
   describe "streaming write callbacks" do
@@ -291,6 +325,25 @@ defmodule Sftpd.Backends.S3Test do
       assert writer.next_part_number == 2
       assert writer.pending_buffer == :binary.copy(<<1>>, 3)
       assert writer.uploaded_parts == [{1, "\"etag-1\""}]
+    end
+
+    test "begin_write normalizes backend errors", %{state: state} do
+      expect(MockExAws, :request, fn _op -> {:error, {:http_error, 403, %{}}} end)
+      assert {:error, :eacces} = S3.begin_write(~c"/large.bin", state)
+    end
+
+    test "write_chunk rejects non-sequential offsets", %{state: state} do
+      writer = %{
+        bucket: "test-bucket",
+        key: "large.bin",
+        upload_id: "upload-1",
+        next_offset: 5,
+        next_part_number: 1,
+        pending_buffer: <<>>,
+        uploaded_parts: []
+      }
+
+      assert {:error, :einval} = S3.write_chunk(writer, 0, "abc", state)
     end
 
     test "finish_write uses put_object for small files", %{state: state} do
@@ -348,6 +401,57 @@ defmodule Sftpd.Backends.S3Test do
       assert :ok = S3.finish_write(writer, state)
     end
 
+    test "finish_write completes multipart uploads without a final buffered part", %{state: state} do
+      writer = %{
+        bucket: "test-bucket",
+        key: "large.bin",
+        upload_id: "upload-1",
+        next_offset: @multipart_part_size,
+        next_part_number: 2,
+        pending_buffer: <<>>,
+        uploaded_parts: [{1, "\"etag-1\""}]
+      }
+
+      expect(MockExAws, :request, fn op ->
+        assert op.http_method == :post
+        assert op.params["uploadId"] == "upload-1"
+        assert op.body =~ "<PartNumber>1</PartNumber>"
+        {:ok, %{}}
+      end)
+
+      assert :ok = S3.finish_write(writer, state)
+    end
+
+    test "finish_write returns eio when upload responses are missing etags", %{state: state} do
+      writer = %{
+        bucket: "test-bucket",
+        key: "large.bin",
+        upload_id: "upload-1",
+        next_offset: @multipart_part_size + 4,
+        next_part_number: 2,
+        pending_buffer: "tail",
+        uploaded_parts: [{1, "\"etag-1\""}]
+      }
+
+      expect(MockExAws, :request, fn _op -> {:ok, %{headers: []}} end)
+      assert {:error, :eio} = S3.finish_write(writer, state)
+    end
+
+    test "abort_write returns ok on successful aborts", %{state: state} do
+      writer = %{
+        bucket: "test-bucket",
+        key: "large.bin",
+        upload_id: "upload-1",
+        next_offset: 0,
+        next_part_number: 1,
+        pending_buffer: <<>>,
+        uploaded_parts: []
+      }
+
+      expect(MockExAws, :request, fn _op -> {:ok, %{}} end)
+      assert :ok = S3.abort_write(writer, state)
+    end
+
     test "abort_write swallows backend errors", %{state: state} do
       writer = %{
         bucket: "test-bucket",
@@ -396,6 +500,23 @@ defmodule Sftpd.Backends.S3Test do
 
       assert {:ok, {:file_info, 10, :regular, _, _, _, _, _, _, _, _, _, _, _}} =
                S3.file_info(~c"/file.txt", state)
+    end
+
+    test "list_dir ignores empty stripped entries and keep markers", %{state: state} do
+      expect(MockExAws, :request, fn op ->
+        assert op.params["prefix"] == "tenant/"
+
+        {:ok,
+         %{
+           body: %{
+             contents: [%{key: "tenant/"}, %{key: "tenant/.keep"}],
+             common_prefixes: [%{prefix: "tenant/dir/"}, %{prefix: "tenant/.keep/"}],
+             is_truncated: "false"
+           }
+         }}
+      end)
+
+      assert {:ok, [~c".", ~c"..", ~c"dir"]} = S3.list_dir(~c"/", state)
     end
   end
 end

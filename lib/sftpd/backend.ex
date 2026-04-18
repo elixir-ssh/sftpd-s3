@@ -264,7 +264,8 @@ defmodule Sftpd.Backend do
 
   Process-based backends use the legacy callback contract only.
   """
-  @spec supports_callback?(module() | {:genserver, GenServer.server()}, atom(), arity()) :: boolean()
+  @spec supports_callback?(module() | {:genserver, GenServer.server()}, atom(), arity()) ::
+          boolean()
   def supports_callback?({:genserver, _server}, _function, _arity), do: false
 
   def supports_callback?(module, function, arity) when is_atom(module) do

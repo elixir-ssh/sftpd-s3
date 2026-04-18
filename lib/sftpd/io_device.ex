@@ -100,7 +100,9 @@ defmodule Sftpd.IODevice do
                |> Map.put(:stream_offset, 0)}
 
             {:error, reason} ->
-              Logger.error("Failed to initialize streaming write for #{inspect(path)}: #{inspect(reason)}")
+              Logger.error(
+                "Failed to initialize streaming write for #{inspect(path)}: #{inspect(reason)}"
+              )
 
               {:noreply,
                state
@@ -131,12 +133,20 @@ defmodule Sftpd.IODevice do
     {:reply, {:error, reason}, state}
   end
 
-  def handle_call({:read, _length}, _from, %{read_strategy: :buffered, size: size, position: pos} = state)
+  def handle_call(
+        {:read, _length},
+        _from,
+        %{read_strategy: :buffered, size: size, position: pos} = state
+      )
       when pos >= size do
     {:reply, :eof, state}
   end
 
-  def handle_call({:read, length}, _from, %{read_strategy: :buffered, content: content, size: size, position: pos} = state) do
+  def handle_call(
+        {:read, length},
+        _from,
+        %{read_strategy: :buffered, content: content, size: size, position: pos} = state
+      ) do
     bytes_to_read = min(length, size - pos)
     data = binary_part(content, pos, bytes_to_read)
     {:reply, {:ok, data}, %{state | position: pos + bytes_to_read}}
@@ -145,7 +155,13 @@ defmodule Sftpd.IODevice do
   def handle_call(
         {:read, length},
         _from,
-        %{read_strategy: :range, path: path, position: pos, backend: backend, backend_state: backend_state} = state
+        %{
+          read_strategy: :range,
+          path: path,
+          position: pos,
+          backend: backend,
+          backend_state: backend_state
+        } = state
       ) do
     case Backend.call(backend, :read_file_range, [path, pos, length, backend_state]) do
       {:ok, data} when byte_size(data) > 0 ->
@@ -206,19 +222,28 @@ defmodule Sftpd.IODevice do
 
   defp maybe_stream_write(%{write_strategy: :legacy} = state, _data, _bytes), do: {:ok, state}
 
-  defp maybe_stream_write(%{write_strategy: :streaming_replay} = state, _data, _bytes), do: {:ok, state}
+  defp maybe_stream_write(%{write_strategy: :streaming_replay} = state, _data, _bytes),
+    do: {:ok, state}
 
   defp maybe_stream_write(
          %{write_strategy: :streaming, position: pos, stream_offset: pos} = state,
          data,
          bytes
        ) do
-    case Backend.call(state.backend, :write_chunk, [state.writer_handle, pos, data, state.backend_state]) do
+    case Backend.call(state.backend, :write_chunk, [
+           state.writer_handle,
+           pos,
+           data,
+           state.backend_state
+         ]) do
       {:ok, writer_handle} ->
         {:ok, %{state | writer_handle: writer_handle, stream_offset: pos + bytes}}
 
       {:error, reason} ->
-        Logger.error("Streaming write failed for #{inspect(state.path)} at offset #{pos}: #{inspect(reason)}")
+        Logger.error(
+          "Streaming write failed for #{inspect(state.path)} at offset #{pos}: #{inspect(reason)}"
+        )
+
         cleanup_streaming_writer(state)
         {:error, reason}
     end
@@ -230,7 +255,12 @@ defmodule Sftpd.IODevice do
     )
 
     cleanup_streaming_writer(state)
-    {:ok, state |> Map.put(:write_strategy, :streaming_replay) |> Map.delete(:writer_handle) |> Map.delete(:stream_offset)}
+
+    {:ok,
+     state
+     |> Map.put(:write_strategy, :streaming_replay)
+     |> Map.delete(:writer_handle)
+     |> Map.delete(:stream_offset)}
   end
 
   defp finalize(%{mode: :read} = state), do: {:ok, state}
@@ -255,13 +285,18 @@ defmodule Sftpd.IODevice do
     {format_finalize_reply(result), close_tempfile(state)}
   end
 
-  defp finalize_streaming_write(%{backend: backend, backend_state: backend_state, writer_handle: writer_handle} = state) do
+  defp finalize_streaming_write(
+         %{backend: backend, backend_state: backend_state, writer_handle: writer_handle} = state
+       ) do
     case Backend.call(backend, :finish_write, [writer_handle, backend_state]) do
       :ok ->
         :ok
 
       {:error, reason} ->
-        Logger.error("Failed to finalize streaming write for #{inspect(state.path)}: #{inspect(reason)}")
+        Logger.error(
+          "Failed to finalize streaming write for #{inspect(state.path)}: #{inspect(reason)}"
+        )
+
         {:error, reason}
     end
   end
@@ -274,7 +309,8 @@ defmodule Sftpd.IODevice do
          size: size
        }) do
     with {:ok, writer_handle} <- Backend.call(backend, :begin_write, [path, backend_state]),
-         {:ok, writer_handle} <- replay_tempfile_chunks(temp_fd, size, writer_handle, backend, backend_state, 0),
+         {:ok, writer_handle} <-
+           replay_tempfile_chunks(temp_fd, size, writer_handle, backend, backend_state, 0),
          :ok <- Backend.call(backend, :finish_write, [writer_handle, backend_state]) do
       :ok
     else
@@ -298,15 +334,26 @@ defmodule Sftpd.IODevice do
     bytes_to_read = min(@stream_chunk_size, size - offset)
 
     with {:ok, data} <- read_temp_chunk(temp_fd, offset, bytes_to_read),
-         {:ok, writer_handle} <- Backend.call(backend, :write_chunk, [writer_handle, offset, data, backend_state]) do
-      replay_tempfile_chunks(temp_fd, size, writer_handle, backend, backend_state, offset + byte_size(data))
+         {:ok, writer_handle} <-
+           Backend.call(backend, :write_chunk, [writer_handle, offset, data, backend_state]) do
+      replay_tempfile_chunks(
+        temp_fd,
+        size,
+        writer_handle,
+        backend,
+        backend_state,
+        offset + byte_size(data)
+      )
     else
       {:error, reason} ->
         {:stream_error, writer_handle, reason}
     end
   end
 
-  defp finalize_legacy_write(%{backend: backend, backend_state: backend_state, path: path, temp_path: temp_path} = state) do
+  defp finalize_legacy_write(
+         %{backend: backend, backend_state: backend_state, path: path, temp_path: temp_path} =
+           state
+       ) do
     close_fd(state.temp_fd)
 
     with {:ok, content} <- File.read(temp_path),
@@ -330,7 +377,11 @@ defmodule Sftpd.IODevice do
     :ok
   end
 
-  defp cleanup_streaming_writer(%{backend: backend, writer_handle: writer_handle, backend_state: backend_state}) do
+  defp cleanup_streaming_writer(%{
+         backend: backend,
+         writer_handle: writer_handle,
+         backend_state: backend_state
+       }) do
     safe_abort_write(backend, writer_handle, backend_state)
   end
 
@@ -397,6 +448,7 @@ defmodule Sftpd.IODevice do
   defp position_from_offset(%{mode: :write}, {:eof, _offset}), do: {:error, :einval}
   defp position_from_offset(%{size: size}, {:eof, offset}), do: validate_position(size + offset)
   defp position_from_offset(_state, {:bof, offset}), do: validate_position(offset)
+
   defp position_from_offset(%{position: current_position}, {:cur, offset}),
     do: validate_position(current_position + offset)
 

@@ -112,7 +112,8 @@ defmodule Sftpd.Backends.S3 do
     src_key = object_key(src, state.prefix)
     dst_key = object_key(dst, state.prefix)
 
-    with {:ok, _} <- aws_request(state, ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
+    with {:ok, _} <-
+           aws_request(state, ExAws.S3.put_object_copy(bucket, dst_key, bucket, src_key)),
          {:ok, _} <- aws_request(state, ExAws.S3.delete_object(bucket, src_key)) do
       :ok
     else
@@ -202,13 +203,20 @@ defmodule Sftpd.Backends.S3 do
   @impl true
   @spec write_chunk(writer_handle(), non_neg_integer(), iodata(), state()) ::
           {:ok, writer_handle()} | {:error, atom()}
-  def write_chunk(%{next_offset: expected_offset}, offset, _chunk, _state) when offset != expected_offset do
+  def write_chunk(%{next_offset: expected_offset}, offset, _chunk, _state)
+      when offset != expected_offset do
     {:error, :einval}
   end
 
   def write_chunk(writer, offset, chunk, state) do
     buffer = writer.pending_buffer <> IO.iodata_to_binary(chunk)
-    writer = %{writer | pending_buffer: buffer, next_offset: offset + byte_size(buffer) - byte_size(writer.pending_buffer)}
+
+    writer = %{
+      writer
+      | pending_buffer: buffer,
+        next_offset: offset + byte_size(buffer) - byte_size(writer.pending_buffer)
+    }
+
     flush_full_parts(writer, state)
   end
 
@@ -236,7 +244,10 @@ defmodule Sftpd.Backends.S3 do
         :ok
 
       {:error, reason} ->
-        Logger.warning("Failed to abort multipart upload for #{inspect(writer.key)}: #{inspect(reason)}")
+        Logger.warning(
+          "Failed to abort multipart upload for #{inspect(writer.key)}: #{inspect(reason)}"
+        )
+
         :ok
     end
   end
@@ -307,7 +318,10 @@ defmodule Sftpd.Backends.S3 do
   end
 
   defp abort_multipart(writer, state) do
-    case aws_request(state, ExAws.S3.abort_multipart_upload(writer.bucket, writer.key, writer.upload_id)) do
+    case aws_request(
+           state,
+           ExAws.S3.abort_multipart_upload(writer.bucket, writer.key, writer.upload_id)
+         ) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, normalize_error(reason)}
     end
@@ -394,8 +408,12 @@ defmodule Sftpd.Backends.S3 do
       end
 
     case stripped do
-      "" -> nil
-      @keep_marker -> nil
+      "" ->
+        nil
+
+      @keep_marker ->
+        nil
+
       value ->
         if String.contains?(value, "/"), do: nil, else: value
     end
