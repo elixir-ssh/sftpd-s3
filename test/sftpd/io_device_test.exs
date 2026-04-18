@@ -5,7 +5,6 @@ defmodule Sftpd.IODeviceTest do
 
   alias Sftpd.IODevice
 
-  # Mock backend for testing
   defmodule MockBackend do
     def read_file(_path, %{content: content}), do: {:ok, content}
     def read_file(_path, %{error: reason}), do: {:error, reason}
@@ -18,8 +17,41 @@ defmodule Sftpd.IODeviceTest do
     end
   end
 
+  defmodule RangeBackend do
+    def read_file_range(_path, offset, len, %{content: content}) do
+      size = byte_size(content)
+
+      if offset >= size do
+        :eof
+      else
+        bytes_to_read = min(len, size - offset)
+        {:ok, binary_part(content, offset, bytes_to_read)}
+      end
+    end
+  end
+
+  defmodule StreamingBackend do
+    def begin_write(_path, %{test_pid: test_pid}), do: {:ok, %{chunks: [], test_pid: test_pid}}
+
+    def write_chunk(handle, offset, chunk, _state) do
+      data = IO.iodata_to_binary(chunk)
+      send(handle.test_pid, {:stream_chunk, offset, data})
+      {:ok, %{handle | chunks: handle.chunks ++ [{offset, data}]}}
+    end
+
+    def finish_write(handle, _state) do
+      send(handle.test_pid, {:stream_finish, handle.chunks})
+      :ok
+    end
+
+    def abort_write(handle, _state) do
+      send(handle.test_pid, {:stream_abort, handle.chunks})
+      :ok
+    end
+  end
+
   describe "read mode" do
-    test "reads file content on init" do
+    test "reads file content on init for legacy backends" do
       {:ok, pid} =
         IODevice.start(%{
           path: ~c"/test.txt",
@@ -32,6 +64,21 @@ defmodule Sftpd.IODeviceTest do
       assert {:ok, " worl"} = GenServer.call(pid, {:read, 5})
       assert {:ok, "d"} = GenServer.call(pid, {:read, 5})
       assert :eof = GenServer.call(pid, {:read, 5})
+    end
+
+    test "uses read_file_range when the backend supports it" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/range.txt",
+          mode: :read,
+          backend: RangeBackend,
+          backend_state: %{content: "abcdefghij"}
+        })
+
+      assert {:ok, "abc"} = GenServer.call(pid, {:read, 3})
+      assert {:ok, "defg"} = GenServer.call(pid, {:read, 4})
+      assert {:ok, "hij"} = GenServer.call(pid, {:read, 4})
+      assert :eof = GenServer.call(pid, {:read, 1})
     end
 
     test "handles read error gracefully" do
@@ -68,10 +115,7 @@ defmodule Sftpd.IODeviceTest do
           backend_state: %{content: "0123456789"}
         })
 
-      # Read 3 bytes to move position to 3
       assert {:ok, "012"} = GenServer.call(pid, {:read, 3})
-
-      # Move 2 bytes forward from current position
       assert {:ok, 5} = GenServer.call(pid, {:position, {:cur, 2}})
       assert {:ok, "56789"} = GenServer.call(pid, {:read, 10})
     end
@@ -86,6 +130,7 @@ defmodule Sftpd.IODeviceTest do
         })
 
       assert {:ok, 7} = GenServer.call(pid, {:position, 7})
+      assert {:ok, "789"} = GenServer.call(pid, {:read, 10})
     end
 
     test "returns eof when position is at or past end" do
@@ -130,7 +175,7 @@ defmodule Sftpd.IODeviceTest do
   end
 
   describe "write mode" do
-    test "buffers writes and uploads on close" do
+    test "persists writes through the legacy backend on close" do
       {:ok, pid} =
         IODevice.start(%{
           path: ~c"/output.txt",
@@ -141,15 +186,13 @@ defmodule Sftpd.IODeviceTest do
 
       assert :ok = GenServer.call(pid, {:write, "hello "})
       assert :ok = GenServer.call(pid, {:write, "world"})
-
-      # Trigger close via file_request message
-      send(pid, {:file_request, self(), make_ref(), :close})
+      assert :ok = GenServer.call(pid, :close)
 
       assert_receive {:written, "hello world"}, 1000
       refute_receive {:written, _}, 200
     end
 
-    test "uploads buffer on terminate" do
+    test "does not upload buffered content on terminate" do
       {:ok, pid} =
         IODevice.start(%{
           path: ~c"/output.txt",
@@ -159,14 +202,12 @@ defmodule Sftpd.IODeviceTest do
         })
 
       assert :ok = GenServer.call(pid, {:write, "content"})
-
-      # Stop the process
       GenServer.stop(pid)
 
-      assert_receive {:written, "content"}, 1000
+      refute_receive {:written, _}, 200
     end
 
-    test "handles upload error gracefully" do
+    test "logs and returns an error when legacy finalization fails" do
       {:ok, pid} =
         IODevice.start(%{
           path: ~c"/output.txt",
@@ -175,15 +216,17 @@ defmodule Sftpd.IODeviceTest do
           backend_state: %{write_error: :eacces}
         })
 
+      assert :ok = GenServer.call(pid, {:write, "content"})
+
       log =
         capture_log(fn ->
-          GenServer.stop(pid)
+          assert {:error, :eacces} = GenServer.call(pid, :close)
         end)
 
-      assert log =~ "Failed to write file"
+      assert log =~ "Failed to finalize legacy write"
     end
 
-    test "position bof always returns 0 in write mode" do
+    test "position bof updates the write cursor" do
       {:ok, pid} =
         IODevice.start(%{
           path: ~c"/output.txt",
@@ -192,7 +235,7 @@ defmodule Sftpd.IODeviceTest do
           backend_state: %{test_pid: self()}
         })
 
-      assert {:ok, 0} = GenServer.call(pid, {:position, {:bof, 100}})
+      assert {:ok, 100} = GenServer.call(pid, {:position, {:bof, 100}})
     end
 
     test "handles iodata in writes" do
@@ -205,10 +248,45 @@ defmodule Sftpd.IODeviceTest do
         })
 
       assert :ok = GenServer.call(pid, {:write, [?a, "bc", [?d, ?e]]})
-
-      GenServer.stop(pid)
+      assert :ok = GenServer.call(pid, :close)
 
       assert_receive {:written, "abcde"}, 1000
+    end
+
+    test "finalizes active streaming writes on close" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/stream.txt",
+          mode: :write,
+          backend: StreamingBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      assert :ok = GenServer.call(pid, {:write, "hello"})
+      assert_receive {:stream_chunk, 0, "hello"}
+      assert :ok = GenServer.call(pid, :close)
+      assert_receive {:stream_finish, [{0, "hello"}]}
+    end
+
+    test "non-sequential writes downgrade to temp-file replay mode" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/stream.txt",
+          mode: :write,
+          backend: StreamingBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      assert :ok = GenServer.call(pid, {:write, "abc"})
+      assert_receive {:stream_chunk, 0, "abc"}
+
+      assert {:ok, 1} = GenServer.call(pid, {:position, {:bof, 1}})
+      assert :ok = GenServer.call(pid, {:write, "Z"})
+      assert_receive {:stream_abort, [{0, "abc"}]}
+
+      assert :ok = GenServer.call(pid, :close)
+      assert_receive {:stream_chunk, 0, "aZc"}
+      assert_receive {:stream_finish, [{0, "aZc"}]}
     end
   end
 
@@ -225,7 +303,6 @@ defmodule Sftpd.IODeviceTest do
       send(pid, :unknown_message)
       send(pid, {:some, :other, :message})
 
-      # Process should still be alive and responsive
       assert {:ok, "hello"} = GenServer.call(pid, {:read, 5})
     end
   end

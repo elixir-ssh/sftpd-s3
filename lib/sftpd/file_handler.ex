@@ -32,7 +32,7 @@ defmodule Sftpd.FileHandler do
   @impl true
   @spec close(io_device(), state()) :: {:ok | {:error, term()}, state()}
   def close(io_device, state) do
-    {GenServer.stop(io_device), state}
+    {GenServer.call(io_device, :close, :infinity), state}
   end
 
   @impl true
