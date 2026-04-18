@@ -54,11 +54,17 @@ performance.
 Sftpd.start_server(
   port: 2222,
   backend: Sftpd.Backends.S3,
-  backend_opts: [bucket: "my-bucket"],
+  backend_opts: [bucket: "my-bucket", prefix: "tenant-a/"],
   users: [{"user", "pass"}],
   system_dir: "/path/to/ssh_host_keys"
 )
 ```
+
+`backend_opts` supports:
+
+- `:bucket` - required S3 bucket name
+- `:prefix` - optional key prefix for namespacing objects within a bucket
+- `:aws_client` - optional ExAws-compatible client module, mainly useful for tests or custom request adapters
 
 Configure ExAws for your S3 endpoint:
 
@@ -82,15 +88,16 @@ Custom module backends can implement optional callbacks for efficient large-file
 transfers:
 
 ```elixir
-@optional_callbacks read_file_range: 4,
-                    begin_write: 2,
-                    write_chunk: 4,
-                    finish_write: 2,
-                    abort_write: 2
+# read_file_range(path, offset, len, state) -> {:ok, binary} | :eof | {:error, reason}
+# begin_write(path, state) -> {:ok, writer_handle} | {:error, reason}
+# write_chunk(writer_handle, offset, chunk, state) -> {:ok, writer_handle} | {:error, reason}
+# finish_write(writer_handle, state) -> :ok | {:error, reason}
+# abort_write(writer_handle, state) -> :ok
 ```
 
 These callbacks let `Sftpd.IODevice` avoid loading whole files into memory on
-open and reduce write-side buffering.
+open and reduce write-side buffering. See `Sftpd.Backend` for the exact
+callback contracts.
 
 Note that OTP's built-in `:ssh_sftpd` implementation always reports success for
 close operations, even if final close-time flushing fails. Write errors are

@@ -18,6 +18,10 @@ defmodule Sftpd.IODeviceTest do
   end
 
   defmodule RangeBackend do
+    def file_info(_path, %{content: content}) do
+      {:ok, Sftpd.Backend.file_info(byte_size(content), {{2024, 1, 1}, {0, 0, 0}})}
+    end
+
     def read_file_range(_path, offset, len, %{content: content}) do
       size = byte_size(content)
 
@@ -77,7 +81,8 @@ defmodule Sftpd.IODeviceTest do
 
       assert {:ok, "abc"} = GenServer.call(pid, {:read, 3})
       assert {:ok, "defg"} = GenServer.call(pid, {:read, 4})
-      assert {:ok, "hij"} = GenServer.call(pid, {:read, 4})
+      assert {:ok, 8} = GenServer.call(pid, {:position, {:eof, -2}})
+      assert {:ok, "ij"} = GenServer.call(pid, {:read, 4})
       assert :eof = GenServer.call(pid, {:read, 1})
     end
 
@@ -236,6 +241,18 @@ defmodule Sftpd.IODeviceTest do
         })
 
       assert {:ok, 100} = GenServer.call(pid, {:position, {:bof, 100}})
+    end
+
+    test "position eof returns einval in write mode" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/output.txt",
+          mode: :write,
+          backend: MockBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      assert {:error, :einval} = GenServer.call(pid, {:position, {:eof, 0}})
     end
 
     test "handles iodata in writes" do

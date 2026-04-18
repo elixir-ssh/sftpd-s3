@@ -47,7 +47,17 @@ defmodule Sftpd.IODevice do
         %{path: path, mode: :read, backend: backend, backend_state: backend_state} = state
       ) do
     if Backend.supports_callback?(backend, :read_file_range, 4) do
-      {:noreply, Map.put(state, :read_strategy, :range)}
+      case Backend.call(backend, :file_info, [path, backend_state]) do
+        {:ok, file_info} ->
+          {:noreply,
+           state
+           |> Map.put(:read_strategy, :range)
+           |> Map.put(:size, extract_file_size(file_info))}
+
+        {:error, reason} ->
+          Logger.warning("Failed to stat file #{inspect(path)}: #{inspect(reason)}")
+          {:noreply, state |> Map.put(:read_strategy, :range) |> Map.put(:error, reason)}
+      end
     else
       case Backend.call(backend, :read_file, [path, backend_state]) do
         {:ok, content} ->
@@ -108,8 +118,13 @@ defmodule Sftpd.IODevice do
 
   @impl GenServer
   def handle_call({:position, offset}, _from, state) do
-    new_position = position_from_offset(state.position, offset)
-    {:reply, {:ok, new_position}, %{state | position: new_position}}
+    case position_from_offset(state, offset) do
+      {:ok, new_position} ->
+        {:reply, {:ok, new_position}, %{state | position: new_position}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:read, _length}, _from, %{error: reason} = state) do
@@ -379,9 +394,19 @@ defmodule Sftpd.IODevice do
     end
   end
 
-  defp position_from_offset(_current_position, {:bof, offset}), do: offset
-  defp position_from_offset(current_position, {:cur, offset}), do: current_position + offset
-  defp position_from_offset(_current_position, offset) when is_integer(offset), do: offset
+  defp position_from_offset(%{mode: :write}, {:eof, _offset}), do: {:error, :einval}
+  defp position_from_offset(%{size: size}, {:eof, offset}), do: validate_position(size + offset)
+  defp position_from_offset(_state, {:bof, offset}), do: validate_position(offset)
+  defp position_from_offset(%{position: current_position}, {:cur, offset}),
+    do: validate_position(current_position + offset)
+
+  defp position_from_offset(_state, offset) when is_integer(offset), do: validate_position(offset)
+  defp position_from_offset(_state, _offset), do: {:error, :einval}
+
+  defp validate_position(position) when position >= 0, do: {:ok, position}
+  defp validate_position(_position), do: {:error, :einval}
+
+  defp extract_file_size({:file_info, size, _, _, _, _, _, _, _, _, _, _, _, _}), do: size
 
   defp format_finalize_reply(:ok), do: :ok
   defp format_finalize_reply({:error, reason}), do: {:error, reason}

@@ -141,7 +141,7 @@ defmodule Sftpd.Backend do
   Read the entire contents of a file.
 
   For large files, consider implementing streaming in your backend
-  and using the `read_file_stream/2` optional callback.
+  and using the `read_file_range/4` optional callback.
   """
   @callback read_file(path(), state()) :: {:ok, binary()} | {:error, atom()}
 
