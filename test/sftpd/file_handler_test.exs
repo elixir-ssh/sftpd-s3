@@ -1,5 +1,6 @@
 defmodule Sftpd.FileHandlerTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   import ExUnit.CaptureLog
 
@@ -38,6 +39,22 @@ defmodule Sftpd.FileHandlerTest do
     def handle_call(:close, _from, state) do
       Process.sleep(:infinity)
       {:reply, :ok, state}
+    end
+  end
+
+  defmodule ControlledCloseDevice do
+    use GenServer
+
+    def start(test_pid), do: GenServer.start(__MODULE__, test_pid)
+
+    @impl true
+    def init(test_pid), do: {:ok, %{test_pid: test_pid}}
+
+    @impl true
+    def handle_call(:close, _from, state) do
+      receive do
+        :release_close -> {:stop, :normal, :ok, state}
+      end
     end
   end
 
@@ -84,6 +101,26 @@ defmodule Sftpd.FileHandlerTest do
   end
 
   describe "close/2" do
+    property "timed-out close can still finish cleanly within the cleanup grace" do
+      check all(release_delay <- integer(25..50), max_runs: 10) do
+        {:ok, pid} = ControlledCloseDevice.start(self())
+        ref = Process.monitor(pid)
+        Process.send_after(pid, :release_close, release_delay)
+
+        capture_log(fn ->
+          assert {{:error, :timeout}, _state} =
+                   FileHandler.close(pid, %{
+                     backend: nil,
+                     backend_state: nil,
+                     close_timeout: 1,
+                     close_shutdown_grace: release_delay + 100
+                   })
+        end)
+
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
+      end
+    end
+
     test "returns timeout but allows a slow close to clean up during the grace window" do
       {:ok, pid} = SlowCloseDevice.start()
       ref = Process.monitor(pid)

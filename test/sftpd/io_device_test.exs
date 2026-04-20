@@ -1,5 +1,6 @@
 defmodule Sftpd.IODeviceTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   import ExUnit.CaptureLog
 
@@ -158,6 +159,71 @@ defmodule Sftpd.IODeviceTest do
   end
 
   describe "read mode" do
+    property "buffered reads return the original content across arbitrary read sizes" do
+      check all(
+              content <- binary(max_length: 256),
+              lengths <- list_of(integer(1..64), min_length: 1, max_length: 20)
+            ) do
+        {:ok, pid} =
+          IODevice.start(%{
+            path: ~c"/test.txt",
+            mode: :read,
+            backend: MockBackend,
+            backend_state: %{content: content}
+          })
+
+        data = read_until_eof(pid, lengths ++ [byte_size(content) + 1])
+        assert data == content
+        assert :eof = GenServer.call(pid, {:read, 1})
+        GenServer.stop(pid)
+      end
+    end
+
+    property "range reads advance by exactly the bytes returned by the backend" do
+      check all(
+              content <- binary(max_length: 256),
+              lengths <- list_of(integer(1..64), min_length: 1, max_length: 20)
+            ) do
+        {:ok, pid} =
+          IODevice.start(%{
+            path: ~c"/range.txt",
+            mode: :read,
+            backend: RangeBackend,
+            backend_state: %{content: content}
+          })
+
+        data = read_until_eof(pid, lengths ++ [byte_size(content) + 1])
+        assert data == content
+        assert :eof = GenServer.call(pid, {:read, 1})
+        GenServer.stop(pid)
+      end
+    end
+
+    property "eof-relative read positions are clamped to valid file offsets" do
+      check all(
+              content <- binary(max_length: 256),
+              offset <- integer(-256..0)
+            ) do
+        {:ok, pid} =
+          IODevice.start(%{
+            path: ~c"/range.txt",
+            mode: :read,
+            backend: RangeBackend,
+            backend_state: %{content: content}
+          })
+
+        expected = max(byte_size(content) + offset, 0)
+
+        if byte_size(content) + offset >= 0 do
+          assert {:ok, ^expected} = GenServer.call(pid, {:position, {:eof, offset}})
+        else
+          assert {:error, :einval} = GenServer.call(pid, {:position, {:eof, offset}})
+        end
+
+        GenServer.stop(pid)
+      end
+    end
+
     test "reads file content on init for legacy backends" do
       {:ok, pid} =
         IODevice.start(%{
@@ -337,6 +403,50 @@ defmodule Sftpd.IODeviceTest do
   end
 
   describe "write mode" do
+    property "legacy sequential writes persist exactly the concatenated bytes on close" do
+      check all(chunks <- list_of(binary(max_length: 64), min_length: 1, max_length: 20)) do
+        {:ok, pid} =
+          IODevice.start(%{
+            path: ~c"/output.txt",
+            mode: :write,
+            backend: MockBackend,
+            backend_state: %{test_pid: self()}
+          })
+
+        for chunk <- chunks do
+          assert :ok = GenServer.call(pid, {:write, chunk})
+        end
+
+        assert :ok = GenServer.call(pid, :close)
+        assert_receive {:written, written}, 1000
+        assert written == IO.iodata_to_binary(chunks)
+      end
+    end
+
+    property "streaming sequential writes preserve chunk offsets and finish state" do
+      check all(chunks <- list_of(binary(max_length: 64), min_length: 1, max_length: 20)) do
+        {:ok, pid} =
+          IODevice.start(%{
+            path: ~c"/stream.txt",
+            mode: :write,
+            backend: StreamingBackend,
+            backend_state: %{test_pid: self()}
+          })
+
+        expected =
+          chunks
+          |> Enum.reduce({0, []}, fn chunk, {offset, acc} ->
+            assert :ok = GenServer.call(pid, {:write, chunk})
+            assert_receive {:stream_chunk, ^offset, ^chunk}, 1000
+            {offset + byte_size(chunk), acc ++ [{offset, chunk}]}
+          end)
+          |> elem(1)
+
+        assert :ok = GenServer.call(pid, :close)
+        assert_receive {:stream_finish, ^expected}, 1000
+      end
+    end
+
     test "persists writes through the legacy backend on close" do
       {:ok, pid} =
         IODevice.start(%{
@@ -574,5 +684,15 @@ defmodule Sftpd.IODeviceTest do
 
       assert {:ok, "hello"} = GenServer.call(pid, {:read, 5})
     end
+  end
+
+  defp read_until_eof(pid, lengths) do
+    Enum.reduce_while(lengths, "", fn length, acc ->
+      case GenServer.call(pid, {:read, length}) do
+        {:ok, data} -> {:cont, acc <> data}
+        :eof -> {:halt, acc}
+        {:error, reason} -> flunk("unexpected read error: #{inspect(reason)}")
+      end
+    end)
   end
 end

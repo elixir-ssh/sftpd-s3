@@ -1,5 +1,6 @@
 defmodule Sftpd.Backends.MemoryTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Sftpd.Backends.Memory
 
@@ -27,6 +28,20 @@ defmodule Sftpd.Backends.MemoryTest do
   end
 
   describe "file operations" do
+    property "written files can be read back byte-for-byte" do
+      check all(files <- map_of(path_generator(), binary(max_length: 128), max_length: 25)) do
+        {:ok, state} = Memory.init([])
+
+        for {path, content} <- files do
+          assert :ok = Memory.write_file(String.to_charlist(path), content, state)
+        end
+
+        for {path, content} <- files do
+          assert {:ok, ^content} = Memory.read_file(String.to_charlist(path), state)
+        end
+      end
+    end
+
     test "write and read file", %{state: state} do
       assert :ok = Memory.write_file(~c"/test.txt", "hello world", state)
       assert {:ok, "hello world"} = Memory.read_file(~c"/test.txt", state)
@@ -56,6 +71,30 @@ defmodule Sftpd.Backends.MemoryTest do
   end
 
   describe "directory operations" do
+    property "directory listings expose only immediate children plus dot entries" do
+      check all(
+              files <-
+                map_of(path_generator(), binary(max_length: 16), min_length: 1, max_length: 30),
+              dir <- candidate_dirs(files)
+            ) do
+        {:ok, state} = Memory.init([])
+
+        for {path, content} <- files do
+          assert :ok = Memory.write_file(String.to_charlist(path), content, state)
+        end
+
+        assert {:ok, listing} = Memory.list_dir(String.to_charlist(dir), state)
+
+        expected_entries =
+          files
+          |> Map.keys()
+          |> immediate_children(dir)
+          |> Enum.map(&String.to_charlist/1)
+
+        assert Enum.sort(listing) == Enum.sort([~c".", ~c".." | expected_entries])
+      end
+    end
+
     test "make and list directory", %{state: state} do
       assert :ok = Memory.make_dir(~c"/mydir", state)
       assert {:ok, listing} = Memory.list_dir(~c"/", state)
@@ -128,5 +167,59 @@ defmodule Sftpd.Backends.MemoryTest do
     test "non-existent returns error", %{state: state} do
       assert {:error, :enoent} = Memory.file_info(~c"/nonexistent", state)
     end
+  end
+
+  defp path_generator do
+    gen all(segments <- list_of(path_segment(), min_length: 1, max_length: 4)) do
+      "/" <> Enum.join(segments, "/")
+    end
+  end
+
+  defp path_segment do
+    string(:alphanumeric, min_length: 1, max_length: 8)
+  end
+
+  defp candidate_dirs(files) do
+    dirs =
+      files
+      |> Map.keys()
+      |> Enum.flat_map(fn path ->
+        path
+        |> String.trim_leading("/")
+        |> String.split("/")
+        |> parent_dirs()
+      end)
+      |> Enum.uniq()
+
+    StreamData.member_of(["/" | dirs])
+  end
+
+  defp parent_dirs([_file]), do: []
+
+  defp parent_dirs(parts) do
+    1..(length(parts) - 1)
+    |> Enum.map(fn count -> "/" <> (parts |> Enum.take(count) |> Enum.join("/")) end)
+  end
+
+  defp immediate_children(paths, dir) do
+    prefix = if dir == "/", do: "", else: String.trim_leading(dir, "/") <> "/"
+
+    paths
+    |> Enum.flat_map(fn path ->
+      path = String.trim_leading(path, "/")
+
+      if String.starts_with?(path, prefix) do
+        path
+        |> String.replace_prefix(prefix, "")
+        |> String.split("/")
+        |> case do
+          [""] -> []
+          [child | _] -> [child]
+        end
+      else
+        []
+      end
+    end)
+    |> Enum.uniq()
   end
 end

@@ -1,5 +1,6 @@
 defmodule Sftpd.BackendTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Sftpd.Backend
 
@@ -36,6 +37,36 @@ defmodule Sftpd.BackendTest do
 
       result = Backend.call({:genserver, pid}, :list_dir, [~c"/", nil])
       assert result == expected
+    end
+  end
+
+  describe "path helpers" do
+    property "normalize_path removes leading slash runs and preserves the rest" do
+      check all(path <- path_string()) do
+        expected = String.trim_leading(path, "/")
+
+        assert Backend.normalize_path(path) == expected
+        assert Backend.normalize_path(String.to_charlist(path)) == expected
+        refute String.starts_with?(Backend.normalize_path(path), "/")
+      end
+    end
+
+    property "root_path? recognizes only documented root forms among generated paths" do
+      root_forms = [~c"/", ~c"/.", ~c"/..", ~c"..", ~c".", ~c""]
+
+      check all(path <- path_string()) do
+        char_path = String.to_charlist(path)
+        assert Backend.root_path?(char_path) == char_path in root_forms
+      end
+    end
+  end
+
+  defp path_string do
+    gen all(
+          slash_count <- integer(0..4),
+          segments <- list_of(string(:alphanumeric, min_length: 1), max_length: 4)
+        ) do
+      String.duplicate("/", slash_count) <> Enum.join(segments, "/")
     end
   end
 end

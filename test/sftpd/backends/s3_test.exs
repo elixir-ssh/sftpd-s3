@@ -1,5 +1,6 @@
 defmodule Sftpd.Backends.S3Test do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   import Mox
 
@@ -64,6 +65,38 @@ defmodule Sftpd.Backends.S3Test do
     setup do
       {:ok, state} = S3.init(bucket: "test-bucket", aws_client: MockExAws)
       %{state: state}
+    end
+
+    property "root listings are sorted unique immediate entries across files and prefixes", %{
+      state: state
+    } do
+      check all(
+              files <- uniq_list_of(s3_segment(), max_length: 20),
+              dirs <- uniq_list_of(s3_segment(), max_length: 20)
+            ) do
+        expect(MockExAws, :request, fn op ->
+          assert op.params["prefix"] == ""
+          assert op.params["delimiter"] == "/"
+
+          {:ok,
+           %{
+             body: %{
+               contents: Enum.map(files, &%{key: &1}) ++ [%{key: ".keep"}],
+               common_prefixes: Enum.map(dirs, &%{prefix: &1 <> "/"}),
+               is_truncated: "false"
+             }
+           }}
+        end)
+
+        expected =
+          (files ++ dirs)
+          |> Enum.uniq()
+          |> Enum.sort()
+          |> Enum.map(&String.to_charlist/1)
+
+        assert {:ok, [~c".", ~c".." | listing]} = S3.list_dir(~c"/", state)
+        assert listing == expected
+      end
     end
 
     test "root path lists top-level entries across pages", %{state: state} do
@@ -269,6 +302,37 @@ defmodule Sftpd.Backends.S3Test do
       assert {:error, :enoent} = S3.read_file(~c"/missing.txt", state)
     end
 
+    property "read_file_range accepts only valid bounded success responses", %{state: state} do
+      check all(
+              offset <- integer(0..64),
+              len <- integer(1..64),
+              body <- binary(max_length: 96),
+              status <- member_of([200, 206, 301, 500])
+            ) do
+        expect(MockExAws, :request, fn op ->
+          assert op.headers["range"] == "bytes=#{offset}-#{offset + len - 1}"
+          {:ok, %{status_code: status, body: body}}
+        end)
+
+        expected =
+          cond do
+            body == "" and status in [200, 206] ->
+              :eof
+
+            status == 206 and byte_size(body) <= len ->
+              {:ok, body}
+
+            status == 200 and offset == 0 and byte_size(body) <= len ->
+              {:ok, body}
+
+            true ->
+              {:error, :eio}
+          end
+
+        assert S3.read_file_range(~c"/file.txt", offset, len, state) == expected
+      end
+    end
+
     test "read_file_range sets the range header and returns data", %{state: state} do
       expect(MockExAws, :request, fn op ->
         assert op.headers["range"] == "bytes=5-8"
@@ -318,6 +382,67 @@ defmodule Sftpd.Backends.S3Test do
     setup do
       {:ok, state} = S3.init(bucket: "test-bucket", aws_client: MockExAws)
       %{state: state}
+    end
+
+    property "write_chunk uploads complete multipart parts and keeps only the remainder", %{
+      state: state
+    } do
+      check all(
+              sizes <-
+                list_of(
+                  member_of([
+                    0,
+                    1,
+                    @multipart_part_size - 1,
+                    @multipart_part_size,
+                    @multipart_part_size + 1
+                  ]),
+                  min_length: 1,
+                  max_length: 4
+                ),
+              max_runs: 15
+            ) do
+        test_pid = self()
+
+        stub(MockExAws, :request, fn op ->
+          assert op.http_method == :put
+          part_number = op.params["partNumber"]
+          send(test_pid, {:uploaded_part, part_number, byte_size(op.body)})
+          {:ok, %{headers: [{"etag", "\"etag-#{part_number}\""}]}}
+        end)
+
+        writer = %{
+          bucket: "test-bucket",
+          key: "large.bin",
+          upload_id: "upload-1",
+          next_offset: 0,
+          next_part_number: 1,
+          pending_chunks: :queue.new(),
+          pending_size: 0,
+          uploaded_parts: []
+        }
+
+        {writer, total_size} =
+          Enum.reduce(sizes, {writer, 0}, fn size, {writer, offset} ->
+            chunk = :binary.copy(<<1>>, size)
+            assert {:ok, writer} = S3.write_chunk(writer, offset, chunk, state)
+            {writer, offset + size}
+          end)
+
+        uploaded_count = div(total_size, @multipart_part_size)
+        remainder = rem(total_size, @multipart_part_size)
+
+        assert writer.next_offset == total_size
+        assert writer.next_part_number == uploaded_count + 1
+        assert writer.pending_size == remainder
+        assert pending_size(writer) == remainder
+
+        for part_number <- 1..uploaded_count//1 do
+          assert_receive {:uploaded_part, ^part_number, @multipart_part_size}, 1000
+        end
+
+        refute_receive {:uploaded_part, _, _}, 100
+      end
     end
 
     test "write_chunk uploads full multipart parts incrementally", %{state: state} do
@@ -555,5 +680,16 @@ defmodule Sftpd.Backends.S3Test do
 
       assert {:ok, [~c".", ~c"..", ~c"dir"]} = S3.list_dir(~c"/", state)
     end
+  end
+
+  defp s3_segment do
+    string(:alphanumeric, min_length: 1, max_length: 12)
+  end
+
+  defp pending_size(writer) do
+    writer.pending_chunks
+    |> :queue.to_list()
+    |> IO.iodata_to_binary()
+    |> byte_size()
   end
 end
