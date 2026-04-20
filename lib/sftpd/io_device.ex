@@ -422,13 +422,39 @@ defmodule Sftpd.IODevice do
   end
 
   defp open_temp_file do
-    temp_path =
-      Path.join(System.tmp_dir!(), "sftpd-#{System.unique_integer([:positive, :monotonic])}.tmp")
+    open_temp_file(System.tmp_dir!(), 10)
+  end
 
-    case :file.open(String.to_charlist(temp_path), [:binary, :raw, :read, :write]) do
-      {:ok, fd} -> {:ok, temp_path, fd}
-      {:error, reason} -> {:error, reason}
+  defp open_temp_file(_tmp_dir, 0), do: {:error, :eexist}
+
+  defp open_temp_file(tmp_dir, attempts_remaining) do
+    temp_path =
+      Path.join(tmp_dir, "sftpd-#{random_temp_suffix()}.tmp")
+
+    case :file.open(String.to_charlist(temp_path), [:binary, :raw, :read, :write, :exclusive]) do
+      {:ok, fd} ->
+        case :file.change_mode(String.to_charlist(temp_path), 0o600) do
+          :ok ->
+            {:ok, temp_path, fd}
+
+          {:error, reason} ->
+            close_fd(fd)
+            File.rm(temp_path)
+            {:error, reason}
+        end
+
+      {:error, :eexist} ->
+        open_temp_file(tmp_dir, attempts_remaining - 1)
+
+      {:error, reason} ->
+        {:error, reason}
     end
+  end
+
+  defp random_temp_suffix do
+    16
+    |> :crypto.strong_rand_bytes()
+    |> Base.url_encode64(padding: false)
   end
 
   defp persist_to_tempfile(temp_fd, position, data) do
@@ -453,7 +479,7 @@ defmodule Sftpd.IODevice do
   defp read_temp_chunk(temp_fd, offset, length) do
     case :file.pread(temp_fd, offset, length) do
       {:ok, data} -> {:ok, data}
-      :eof -> {:ok, <<>>}
+      :eof -> {:error, :eof}
       {:error, reason} -> {:error, reason}
     end
   end

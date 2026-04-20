@@ -118,6 +118,14 @@ defmodule Sftpd.Backends.MemoryTest do
       assert ~c"file1.txt" in listing
       assert ~c"file2.txt" in listing
     end
+
+    test "list_dir strips only one copy of a repeated directory prefix", %{state: state} do
+      Memory.write_file(~c"/dir/dir/file.txt", "a", state)
+
+      assert {:ok, listing} = Memory.list_dir(~c"/dir", state)
+      assert ~c"dir" in listing
+      refute ~c"file.txt" in listing
+    end
   end
 
   describe "root path variants" do

@@ -405,16 +405,21 @@ defmodule Sftpd.Backends.S3Test do
         test_pid = self()
 
         stub(MockExAws, :request, fn op ->
-          assert op.http_method == :put
-          part_number = op.params["partNumber"]
-          send(test_pid, {:uploaded_part, part_number, byte_size(op.body)})
-          {:ok, %{headers: [{"etag", "\"etag-#{part_number}\""}]}}
+          case op.http_method do
+            :post ->
+              {:ok, %{body: %{upload_id: "upload-1"}}}
+
+            :put ->
+              part_number = op.params["partNumber"]
+              send(test_pid, {:uploaded_part, part_number, byte_size(op.body)})
+              {:ok, %{headers: [{"etag", "\"etag-#{part_number}\""}]}}
+          end
         end)
 
         writer = %{
           bucket: "test-bucket",
           key: "large.bin",
-          upload_id: "upload-1",
+          upload_id: nil,
           next_offset: 0,
           next_part_number: 1,
           pending_chunks: :queue.new(),
@@ -446,12 +451,13 @@ defmodule Sftpd.Backends.S3Test do
     end
 
     test "write_chunk uploads full multipart parts incrementally", %{state: state} do
+      assert {:ok, writer} = S3.begin_write(~c"/large.bin", state)
+      assert writer.upload_id == nil
+
       expect(MockExAws, :request, fn op ->
         assert op.http_method == :post
         {:ok, %{body: %{upload_id: "upload-1"}}}
       end)
-
-      assert {:ok, writer} = S3.begin_write(~c"/large.bin", state)
 
       expect(MockExAws, :request, fn op ->
         assert op.http_method == :put
@@ -462,6 +468,7 @@ defmodule Sftpd.Backends.S3Test do
 
       chunk = :binary.copy(<<1>>, @multipart_part_size + 3)
       assert {:ok, writer} = S3.write_chunk(writer, 0, chunk, state)
+      assert writer.upload_id == "upload-1"
       assert writer.next_part_number == 2
       assert writer.pending_size == 3
       assert :queue.to_list(writer.pending_chunks) == [:binary.copy(<<1>>, 3)]
@@ -469,22 +476,22 @@ defmodule Sftpd.Backends.S3Test do
     end
 
     test "write_chunk keeps small writes in queued buffers", %{state: state} do
-      expect(MockExAws, :request, fn op ->
-        assert op.http_method == :post
-        {:ok, %{body: %{upload_id: "upload-1"}}}
-      end)
-
       assert {:ok, writer} = S3.begin_write(~c"/large.bin", state)
       assert {:ok, writer} = S3.write_chunk(writer, 0, "abc", state)
       assert {:ok, writer} = S3.write_chunk(writer, 3, ["de", ?f], state)
 
+      assert writer.upload_id == nil
       assert writer.pending_size == 6
       assert :queue.to_list(writer.pending_chunks) == ["abc", "def"]
     end
 
-    test "begin_write normalizes backend errors", %{state: state} do
+    test "write_chunk normalizes multipart initiation errors", %{state: state} do
+      assert {:ok, writer} = S3.begin_write(~c"/large.bin", state)
+
       expect(MockExAws, :request, fn _op -> {:error, {:http_error, 403, %{}}} end)
-      assert {:error, :eacces} = S3.begin_write(~c"/large.bin", state)
+
+      chunk = :binary.copy(<<1>>, @multipart_part_size)
+      assert {:error, :eacces} = S3.write_chunk(writer, 0, chunk, state)
     end
 
     test "write_chunk rejects non-sequential offsets", %{state: state} do
@@ -502,23 +509,17 @@ defmodule Sftpd.Backends.S3Test do
       assert {:error, :einval} = S3.write_chunk(writer, 0, "abc", state)
     end
 
-    test "finish_write uses put_object for small files", %{state: state} do
+    test "finish_write uses put_object directly for small files", %{state: state} do
       writer = %{
         bucket: "test-bucket",
         key: "small.txt",
-        upload_id: "upload-1",
+        upload_id: nil,
         next_offset: 3,
         next_part_number: 1,
         pending_chunks: :queue.from_list(["abc"]),
         pending_size: 3,
         uploaded_parts: []
       }
-
-      expect(MockExAws, :request, fn op ->
-        assert op.http_method == :delete
-        assert op.params["uploadId"] == "upload-1"
-        {:ok, %{}}
-      end)
 
       expect(MockExAws, :request, fn op ->
         assert op.http_method == :put
@@ -652,6 +653,23 @@ defmodule Sftpd.Backends.S3Test do
       end)
 
       assert {:ok, [~c".", ~c"..", ~c"dir", ~c"file.txt"]} = S3.list_dir(~c"/", state)
+    end
+
+    test "list_dir strips only one copy of the global prefix", %{state: state} do
+      expect(MockExAws, :request, fn op ->
+        assert op.params["prefix"] == "tenant/"
+
+        {:ok,
+         %{
+           body: %{
+             contents: [],
+             common_prefixes: [%{prefix: "tenant/tenant/"}],
+             is_truncated: "false"
+           }
+         }}
+      end)
+
+      assert {:ok, [~c".", ~c"..", ~c"tenant"]} = S3.list_dir(~c"/", state)
     end
 
     test "file_info uses the prefixed object key", %{state: state} do

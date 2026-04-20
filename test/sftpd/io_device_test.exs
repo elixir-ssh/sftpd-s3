@@ -464,6 +464,22 @@ defmodule Sftpd.IODeviceTest do
       refute_receive {:written, _}, 200
     end
 
+    test "creates temp files with owner-only permissions" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/output.txt",
+          mode: :write,
+          backend: MockBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      %{temp_path: temp_path} = :sys.get_state(pid)
+      assert {:ok, %{mode: mode}} = File.stat(temp_path)
+      assert Bitwise.band(mode, 0o777) == 0o600
+
+      assert :ok = GenServer.call(pid, :close)
+    end
+
     test "does not upload buffered content on terminate" do
       {:ok, pid} =
         IODevice.start(%{
@@ -666,6 +682,29 @@ defmodule Sftpd.IODeviceTest do
         end)
 
       assert log =~ "Failed to replay temp file"
+    end
+
+    test "returns an error instead of looping when temp replay hits unexpected eof" do
+      {:ok, agent} = Agent.start_link(fn -> 0 end)
+
+      log =
+        capture_log(fn ->
+          {:ok, pid} =
+            IODevice.start(%{
+              path: ~c"/stream.txt",
+              mode: :write,
+              backend: ReplayBackend,
+              backend_state: %{agent: agent, test_pid: self()}
+            })
+
+          assert :ok = GenServer.call(pid, {:write, "abc"})
+          :sys.replace_state(pid, fn state -> %{state | size: 10} end)
+          assert {:error, :eof} = GenServer.call(pid, :close)
+        end)
+
+      assert log =~ "Failed to replay temp file"
+      assert_receive {:replay_chunk, 0, "abc"}
+      assert_receive {:replay_abort, [{0, "abc"}]}
     end
   end
 

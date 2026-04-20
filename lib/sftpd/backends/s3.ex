@@ -21,7 +21,7 @@ defmodule Sftpd.Backends.S3 do
   @type writer_handle :: %{
           bucket: String.t(),
           key: String.t(),
-          upload_id: String.t(),
+          upload_id: String.t() | nil,
           next_offset: non_neg_integer(),
           next_part_number: pos_integer(),
           pending_chunks: :queue.queue(binary()),
@@ -179,23 +179,17 @@ defmodule Sftpd.Backends.S3 do
   def begin_write(path, state) do
     key = object_key(path, state.prefix)
 
-    case aws_request(state, ExAws.S3.initiate_multipart_upload(state.bucket, key)) do
-      {:ok, %{body: %{upload_id: upload_id}}} ->
-        {:ok,
-         %{
-           bucket: state.bucket,
-           key: key,
-           upload_id: upload_id,
-           next_offset: 0,
-           next_part_number: 1,
-           pending_chunks: :queue.new(),
-           pending_size: 0,
-           uploaded_parts: []
-         }}
-
-      {:error, reason} ->
-        {:error, normalize_error(reason)}
-    end
+    {:ok,
+     %{
+       bucket: state.bucket,
+       key: key,
+       upload_id: nil,
+       next_offset: 0,
+       next_part_number: 1,
+       pending_chunks: :queue.new(),
+       pending_size: 0,
+       uploaded_parts: []
+     }}
   end
 
   @impl true
@@ -222,6 +216,10 @@ defmodule Sftpd.Backends.S3 do
 
   @impl true
   @spec finish_write(writer_handle(), state()) :: :ok | {:error, atom()}
+  def finish_write(%{upload_id: nil, uploaded_parts: []} = writer, state) do
+    put_small_object(writer, state)
+  end
+
   def finish_write(%{uploaded_parts: []} = writer, state) do
     with :ok <- abort_multipart(writer, state),
          :ok <- put_small_object(writer, state) do
@@ -252,22 +250,36 @@ defmodule Sftpd.Backends.S3 do
     end
   end
 
+  defp ensure_multipart_started(%{upload_id: nil} = writer, state) do
+    case aws_request(state, ExAws.S3.initiate_multipart_upload(writer.bucket, writer.key)) do
+      {:ok, %{body: %{upload_id: upload_id}}} ->
+        {:ok, %{writer | upload_id: upload_id}}
+
+      {:error, reason} ->
+        {:error, normalize_error(reason)}
+    end
+  end
+
+  defp ensure_multipart_started(writer, _state), do: {:ok, writer}
+
   defp flush_full_parts(%{pending_size: size} = writer, _state)
        when size < @multipart_part_size do
     {:ok, writer}
   end
 
   defp flush_full_parts(writer, state) do
-    {part, pending_chunks} = take_pending_bytes(writer.pending_chunks, @multipart_part_size)
+    with {:ok, writer} <- ensure_multipart_started(writer, state) do
+      {part, pending_chunks} = take_pending_bytes(writer.pending_chunks, @multipart_part_size)
 
-    writer = %{
-      writer
-      | pending_chunks: pending_chunks,
-        pending_size: writer.pending_size - @multipart_part_size
-    }
+      writer = %{
+        writer
+        | pending_chunks: pending_chunks,
+          pending_size: writer.pending_size - @multipart_part_size
+      }
 
-    with {:ok, writer} <- upload_part(writer, part, state) do
-      flush_full_parts(writer, state)
+      with {:ok, writer} <- upload_part(writer, part, state) do
+        flush_full_parts(writer, state)
+      end
     end
   end
 
@@ -357,6 +369,8 @@ defmodule Sftpd.Backends.S3 do
     end
   end
 
+  defp abort_multipart(%{upload_id: nil}, _state), do: :ok
+
   defp abort_multipart(writer, state) do
     case aws_request(
            state,
@@ -441,13 +455,16 @@ defmodule Sftpd.Backends.S3 do
 
   defp strip_entry_prefix(entry, prefix) do
     stripped =
-      if prefix == "" do
-        entry
-      else
-        String.trim_leading(entry, prefix)
+      cond do
+        prefix == "" -> entry
+        String.starts_with?(entry, prefix) -> String.replace_prefix(entry, prefix, "")
+        true -> nil
       end
 
     case stripped do
+      nil ->
+        nil
+
       "" ->
         nil
 

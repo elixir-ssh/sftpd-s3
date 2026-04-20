@@ -79,7 +79,7 @@ defmodule Sftpd.Backends.Memory do
   end
 
   defp trim_prefix(str, ""), do: str
-  defp trim_prefix(str, prefix), do: String.trim_leading(str, prefix)
+  defp trim_prefix(str, prefix), do: String.replace_prefix(str, prefix, "")
 
   @impl true
   @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
