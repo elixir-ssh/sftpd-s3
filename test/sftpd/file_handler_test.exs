@@ -22,6 +22,21 @@ defmodule Sftpd.FileHandlerTest do
     @impl true
     def handle_call(:close, _from, state) do
       Process.sleep(50)
+      {:stop, :normal, :ok, state}
+    end
+  end
+
+  defmodule HangingCloseDevice do
+    use GenServer
+
+    def start, do: GenServer.start(__MODULE__, [])
+
+    @impl true
+    def init(_args), do: {:ok, %{}}
+
+    @impl true
+    def handle_call(:close, _from, state) do
+      Process.sleep(:infinity)
       {:reply, :ok, state}
     end
   end
@@ -69,18 +84,42 @@ defmodule Sftpd.FileHandlerTest do
   end
 
   describe "close/2" do
-    test "returns an error and terminates the device when close times out" do
+    test "returns timeout but allows a slow close to clean up during the grace window" do
       {:ok, pid} = SlowCloseDevice.start()
       ref = Process.monitor(pid)
 
       log =
         capture_log(fn ->
           assert {{:error, :timeout}, _state} =
-                   FileHandler.close(pid, %{backend: nil, backend_state: nil, close_timeout: 10})
+                   FileHandler.close(pid, %{
+                     backend: nil,
+                     backend_state: nil,
+                     close_timeout: 10,
+                     close_shutdown_grace: 200
+                   })
+        end)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
+      assert log =~ "Timed out waiting 10ms"
+    end
+
+    test "kills the device when cleanup grace also expires" do
+      {:ok, pid} = HangingCloseDevice.start()
+      ref = Process.monitor(pid)
+
+      log =
+        capture_log(fn ->
+          assert {{:error, :timeout}, _state} =
+                   FileHandler.close(pid, %{
+                     backend: nil,
+                     backend_state: nil,
+                     close_timeout: 10,
+                     close_shutdown_grace: 10
+                   })
         end)
 
       assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1000
-      assert log =~ "Timed out waiting 10ms"
+      assert log =~ "did not close within 10ms cleanup grace"
     end
   end
 end

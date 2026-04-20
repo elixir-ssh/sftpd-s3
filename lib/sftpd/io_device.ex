@@ -90,7 +90,7 @@ defmodule Sftpd.IODevice do
           |> Map.put(:temp_path, temp_path)
           |> Map.put(:temp_fd, temp_fd)
 
-        if Backend.supports_callback?(backend, :begin_write, 2) do
+        if streaming_write_supported?(backend) do
           case Backend.call(backend, :begin_write, [path, backend_state]) do
             {:ok, writer_handle} ->
               {:noreply,
@@ -297,6 +297,7 @@ defmodule Sftpd.IODevice do
           "Failed to finalize streaming write for #{inspect(state.path)}: #{inspect(reason)}"
         )
 
+        cleanup_streaming_writer(state)
         {:error, reason}
     end
   end
@@ -435,6 +436,18 @@ defmodule Sftpd.IODevice do
       :ok -> :ok
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp streaming_write_supported?(backend) do
+    Enum.all?(
+      [
+        {:begin_write, 2},
+        {:write_chunk, 4},
+        {:finish_write, 2},
+        {:abort_write, 2}
+      ],
+      fn {function, arity} -> Backend.supports_callback?(backend, function, arity) end
+    )
   end
 
   defp read_temp_chunk(temp_fd, offset, length) do

@@ -73,6 +73,15 @@ defmodule Sftpd.IODeviceTest do
     end
   end
 
+  defmodule PartialStreamingBackend do
+    def begin_write(_path, %{test_pid: test_pid}), do: {:ok, %{test_pid: test_pid}}
+
+    def write_file(_path, content, %{test_pid: test_pid}) do
+      send(test_pid, {:partial_written, content})
+      :ok
+    end
+  end
+
   defmodule ReplayBackend do
     def begin_write(_path, %{agent: agent, test_pid: test_pid}) do
       Agent.get_and_update(agent, fn attempts ->
@@ -121,7 +130,11 @@ defmodule Sftpd.IODeviceTest do
     end
 
     def finish_write(_handle, _state), do: {:error, :eio}
-    def abort_write(_handle, _state), do: :ok
+
+    def abort_write(handle, _state) do
+      send(handle.test_pid, {:finish_error_abort, handle.chunks})
+      :ok
+    end
   end
 
   defmodule ReplayWriteErrorBackend do
@@ -451,6 +464,20 @@ defmodule Sftpd.IODeviceTest do
       assert_receive {:replay_finish, [{0, "hello"}]}
     end
 
+    test "falls back to legacy writes unless all streaming callbacks are present" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/partial.txt",
+          mode: :write,
+          backend: PartialStreamingBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      assert :ok = GenServer.call(pid, {:write, "hello"})
+      assert :ok = GenServer.call(pid, :close)
+      assert_receive {:partial_written, "hello"}, 1000
+    end
+
     test "non-sequential writes downgrade to temp-file replay mode" do
       {:ok, pid} =
         IODevice.start(%{
@@ -508,6 +535,7 @@ defmodule Sftpd.IODeviceTest do
         end)
 
       assert log =~ "Failed to finalize streaming write"
+      assert_receive {:finish_error_abort, [{0, "hello"}]}
     end
 
     test "returns errors when replaying the temp file fails" do

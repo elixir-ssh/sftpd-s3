@@ -22,12 +22,14 @@ defmodule Sftpd.FileHandler do
   alias Sftpd.{Backend, IODevice}
 
   @default_close_timeout 30_000
+  @default_close_shutdown_grace 1_000
 
   @typedoc "File handler state containing backend module and its state"
   @type state :: %{
           backend: module() | {:genserver, GenServer.server()},
           backend_state: term(),
           close_timeout: timeout(),
+          close_shutdown_grace: non_neg_integer(),
           cwd: charlist()
         }
 
@@ -45,10 +47,14 @@ defmodule Sftpd.FileHandler do
       catch
         :exit, {:timeout, {GenServer, :call, _details}} ->
           Logger.error(
-            "Timed out waiting #{timeout}ms for #{inspect(io_device)} to close; terminating IODevice"
+            "Timed out waiting #{timeout}ms for #{inspect(io_device)} to close; waiting for cleanup before terminating IODevice"
           )
 
-          if Process.alive?(io_device), do: Process.exit(io_device, :kill)
+          terminate_timed_out_device(
+            io_device,
+            Map.get(state, :close_shutdown_grace, @default_close_shutdown_grace)
+          )
+
           {:error, :timeout}
 
         :exit, reason ->
@@ -57,6 +63,30 @@ defmodule Sftpd.FileHandler do
       end
 
     {result, state}
+  end
+
+  defp terminate_timed_out_device(io_device, shutdown_grace) do
+    ref = Process.monitor(io_device)
+
+    receive do
+      {:DOWN, ^ref, :process, ^io_device, _reason} ->
+        :ok
+    after
+      shutdown_grace ->
+        if Process.alive?(io_device) do
+          Logger.error(
+            "IODevice #{inspect(io_device)} did not close within #{shutdown_grace}ms cleanup grace; killing it"
+          )
+
+          Process.exit(io_device, :kill)
+        end
+
+        receive do
+          {:DOWN, ^ref, :process, ^io_device, _reason} -> :ok
+        after
+          0 -> Process.demonitor(ref, [:flush])
+        end
+    end
   end
 
   @impl true
