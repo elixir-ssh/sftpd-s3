@@ -26,11 +26,11 @@ defmodule Sftpd.FileHandler do
 
   @typedoc "File handler state containing backend module and its state"
   @type state :: %{
-          backend: module() | {:genserver, GenServer.server()},
-          backend_state: term(),
-          close_timeout: timeout(),
-          close_shutdown_grace: non_neg_integer(),
-          cwd: charlist()
+          required(:backend) => module() | {:genserver, GenServer.server()},
+          required(:backend_state) => term(),
+          optional(:close_timeout) => timeout(),
+          optional(:close_shutdown_grace) => non_neg_integer(),
+          optional(:cwd) => charlist()
         }
 
   @typedoc "IO device handle (GenServer pid)"

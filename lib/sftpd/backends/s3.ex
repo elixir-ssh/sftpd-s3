@@ -125,7 +125,7 @@ defmodule Sftpd.Backends.S3 do
 
           mapped ->
             Logger.error(
-              "S3 rename failed after copy/delete for #{inspect(src_key)} -> #{inspect(dst_key)}: #{inspect(reason)}"
+              "S3 rename failed for #{inspect(src_key)} -> #{inspect(dst_key)}: #{inspect(reason)}"
             )
 
             {:error, mapped}
