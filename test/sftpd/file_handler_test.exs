@@ -45,10 +45,12 @@ defmodule Sftpd.FileHandlerTest do
   defmodule ControlledCloseDevice do
     use GenServer
 
-    def start(test_pid, release_delay \\ nil), do: GenServer.start(__MODULE__, {test_pid, release_delay})
+    def start(test_pid, release_delay \\ nil),
+      do: GenServer.start(__MODULE__, {test_pid, release_delay})
 
     @impl true
-    def init({test_pid, release_delay}), do: {:ok, %{test_pid: test_pid, release_delay: release_delay}}
+    def init({test_pid, release_delay}),
+      do: {:ok, %{test_pid: test_pid, release_delay: release_delay}}
 
     @impl true
     def handle_call(:close, _from, state) do
