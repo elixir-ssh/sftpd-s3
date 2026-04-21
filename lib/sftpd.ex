@@ -11,7 +11,7 @@ defmodule Sftpd do
       {:ok, pid} = Sftpd.start_server(
         port: 2222,
         backend: Sftpd.Backends.S3,
-        backend_opts: [bucket: "my-bucket"],
+        backend_opts: [bucket: "my-bucket", prefix: "tenant-a/"],
         users: [{"user", "password"}]
       )
 
@@ -28,6 +28,7 @@ defmodule Sftpd do
   - `:port` - Port to listen on (default: 22)
   - `:backend` - Backend module or `{:genserver, pid_or_name}` (required)
   - `:backend_opts` - Options passed to `backend.init/1` for module backends (default: [])
+    The built-in S3 backend accepts `:bucket`, `:prefix`, and `:aws_client`.
   - `:users` - List of `{username, password}` tuples for authentication
   - `:system_dir` - Directory containing SSH host keys (required)
   - `:max_sessions` - Maximum concurrent sessions (default: 10)
@@ -66,7 +67,7 @@ defmodule Sftpd do
       {:ok, pid} = Sftpd.start_server(
         port: 2222,
         backend: Sftpd.Backends.S3,
-        backend_opts: [bucket: "my-bucket"],
+        backend_opts: [bucket: "my-bucket", prefix: "tenant-a/"],
         users: [{"admin", "secret"}],
         system_dir: "/etc/ssh"
       )
