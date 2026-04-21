@@ -15,7 +15,7 @@ defmodule SftpdS3 do
       Sftpd.start_server(
         port: port,
         backend: Sftpd.Backends.S3,
-        backend_opts: [bucket: "your-bucket"],
+        backend_opts: [bucket: "your-bucket", prefix: "tenant-a/"],
         users: [{"user", "password"}],
         system_dir: "path/to/ssh_keys"
       )
@@ -32,19 +32,23 @@ defmodule SftpdS3 do
   - `:username` - SFTP username (default: from config or "user")
   - `:password` - SFTP password (default: from config or "password")
   - `:bucket` - S3 bucket name (default: from config)
+  - `:prefix` - Optional S3 key prefix
+  - `:aws_client` - Optional ExAws-compatible client module
   """
   @deprecated "Use Sftpd.start_server/1 instead"
   @spec start_server(non_neg_integer(), keyword()) :: {:ok, :ssh.daemon_ref()} | {:error, term()}
   def start_server(port \\ 22, opts \\ []) do
     system_dir = Keyword.fetch!(opts, :system_dir)
     bucket = Keyword.get(opts, :bucket, Application.get_env(:sftpd, :bucket))
+    prefix = Keyword.get(opts, :prefix, "")
+    aws_client = Keyword.get(opts, :aws_client, ExAws)
     username = Keyword.get(opts, :username, Application.get_env(:sftpd, :username, "user"))
     password = Keyword.get(opts, :password, Application.get_env(:sftpd, :password, "password"))
 
     Sftpd.start_server(
       port: port,
       backend: Sftpd.Backends.S3,
-      backend_opts: [bucket: bucket],
+      backend_opts: [bucket: bucket, prefix: prefix, aws_client: aws_client],
       users: [{username, password}],
       system_dir: system_dir
     )

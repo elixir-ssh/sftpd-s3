@@ -17,13 +17,20 @@ defmodule Sftpd.FileHandler do
 
   @behaviour :ssh_sftpd_file_api
 
+  require Logger
+
   alias Sftpd.{Backend, IODevice}
+
+  @default_close_timeout 30_000
+  @default_close_shutdown_grace 1_000
 
   @typedoc "File handler state containing backend module and its state"
   @type state :: %{
-          backend: module() | {:genserver, GenServer.server()},
-          backend_state: term(),
-          cwd: charlist()
+          required(:backend) => module() | {:genserver, GenServer.server()},
+          required(:backend_state) => term(),
+          optional(:close_timeout) => timeout(),
+          optional(:close_shutdown_grace) => non_neg_integer(),
+          optional(:cwd) => charlist()
         }
 
   @typedoc "IO device handle (GenServer pid)"
@@ -32,7 +39,72 @@ defmodule Sftpd.FileHandler do
   @impl true
   @spec close(io_device(), state()) :: {:ok | {:error, term()}, state()}
   def close(io_device, state) do
-    {GenServer.stop(io_device), state}
+    timeout = Map.get(state, :close_timeout, @default_close_timeout)
+    shutdown_grace = Map.get(state, :close_shutdown_grace, @default_close_shutdown_grace)
+
+    result = close_via_task(io_device, timeout, shutdown_grace)
+
+    {result, state}
+  end
+
+  defp close_via_task(io_device, timeout, shutdown_grace) do
+    caller = self()
+    ref = make_ref()
+
+    pid =
+      spawn(fn ->
+        send(caller, {ref, self(), call_close(io_device)})
+      end)
+
+    receive do
+      {^ref, ^pid, {:ok, result}} ->
+        result
+
+      {^ref, ^pid, {:exit, reason}} ->
+        Logger.error("IODevice close failed for #{inspect(io_device)}: #{inspect(reason)}")
+        {:error, :eio}
+    after
+      timeout ->
+        Logger.error(
+          "Timed out waiting #{timeout}ms for #{inspect(io_device)} to close; waiting for cleanup before terminating IODevice"
+        )
+
+        Process.exit(pid, :kill)
+        terminate_timed_out_device(io_device, shutdown_grace)
+        {:error, :timeout}
+    end
+  end
+
+  defp call_close(io_device) do
+    try do
+      {:ok, GenServer.call(io_device, :close, :infinity)}
+    catch
+      :exit, reason -> {:exit, reason}
+    end
+  end
+
+  defp terminate_timed_out_device(io_device, shutdown_grace) do
+    ref = Process.monitor(io_device)
+
+    receive do
+      {:DOWN, ^ref, :process, ^io_device, _reason} ->
+        :ok
+    after
+      shutdown_grace ->
+        if Process.alive?(io_device) do
+          Logger.error(
+            "IODevice #{inspect(io_device)} did not close within #{shutdown_grace}ms cleanup grace; killing it"
+          )
+
+          Process.exit(io_device, :kill)
+        end
+
+        receive do
+          {:DOWN, ^ref, :process, ^io_device, _reason} -> :ok
+        after
+          0 -> Process.demonitor(ref, [:flush])
+        end
+    end
   end
 
   @impl true

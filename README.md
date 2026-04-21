@@ -46,16 +46,25 @@ Sftpd.start_server(
 ### S3 Backend
 
 Stores files in Amazon S3 or S3-compatible storage (LocalStack, MinIO, etc.).
+The built-in S3 backend now uses range reads, paginated delimiter-based
+directory listings, and multipart streaming writes for better large-file
+performance.
 
 ```elixir
 Sftpd.start_server(
   port: 2222,
   backend: Sftpd.Backends.S3,
-  backend_opts: [bucket: "my-bucket"],
+  backend_opts: [bucket: "my-bucket", prefix: "tenant-a/"],
   users: [{"user", "pass"}],
   system_dir: "/path/to/ssh_host_keys"
 )
 ```
+
+`backend_opts` supports:
+
+- `:bucket` - required S3 bucket name
+- `:prefix` - optional key prefix for namespacing objects within a bucket
+- `:aws_client` - optional ExAws-compatible client module, mainly useful for tests or custom request adapters
 
 Configure ExAws for your S3 endpoint:
 
@@ -72,6 +81,32 @@ config :ex_aws, :s3,
   host: "localhost",
   port: 4566
 ```
+
+### Optional Streaming Backend Callbacks
+
+Custom module backends can implement optional callbacks for efficient large-file
+transfers:
+
+```elixir
+# read_file_range(path, offset, len, state) -> {:ok, binary} | :eof | {:error, reason}
+# begin_write(path, state) -> {:ok, writer_handle} | {:error, reason}
+# write_chunk(writer_handle, offset, chunk, state) -> {:ok, writer_handle} | {:error, reason}
+# finish_write(writer_handle, state) -> :ok | {:error, reason}
+# abort_write(writer_handle, state) -> :ok
+```
+
+These callbacks let `Sftpd.IODevice` avoid loading whole files into memory on
+open and reduce write-side buffering. See `Sftpd.Backend` for the exact
+callback contracts.
+
+Note that OTP's built-in `:ssh_sftpd` implementation always reports success for
+close operations, even if final close-time flushing fails. Write errors are
+therefore surfaced during active writes whenever possible, while close-only
+failures are logged server-side.
+
+If you need to bound how long close-time finalization can block a session, pass
+`close_timeout: timeout_in_ms` to `Sftpd.start_server/1`. The default is
+`30_000`.
 
 ### Custom Backends
 

@@ -53,24 +53,33 @@ defmodule Sftpd.Backends.Memory do
   @impl true
   @spec list_dir(Backend.path(), state()) :: {:ok, [charlist()]}
   def list_dir(path, %{agent: agent}) do
-    files = Agent.get(agent, & &1)
     prefix = normalize_prefix(path)
 
     entries =
-      files
-      |> Map.keys()
-      |> Enum.filter(&String.starts_with?(&1, prefix))
-      |> Enum.map(&trim_prefix(&1, prefix))
-      |> Enum.map(&(String.split(&1, "/") |> List.first()))
-      |> Enum.reject(&(&1 in ["", @keep_marker]))
-      |> Enum.uniq()
-      |> Enum.map(&to_charlist/1)
+      Agent.get(agent, fn files ->
+        files
+        |> Map.keys()
+        |> Enum.reduce(MapSet.new(), fn key, entries ->
+          if String.starts_with?(key, prefix) do
+            case key |> trim_prefix(prefix) |> first_path_segment() do
+              "" -> entries
+              @keep_marker -> entries
+              entry -> MapSet.put(entries, entry)
+            end
+          else
+            entries
+          end
+        end)
+        |> MapSet.to_list()
+        |> Enum.sort()
+        |> Enum.map(&to_charlist/1)
+      end)
 
     {:ok, [~c".", ~c".." | entries]}
   end
 
   defp trim_prefix(str, ""), do: str
-  defp trim_prefix(str, prefix), do: String.trim_leading(str, prefix)
+  defp trim_prefix(str, prefix), do: String.replace_prefix(str, prefix, "")
 
   @impl true
   @spec file_info(Backend.path(), state()) :: {:ok, Backend.file_info()} | {:error, atom()}
@@ -79,22 +88,20 @@ defmodule Sftpd.Backends.Memory do
       {:ok, Backend.directory_info()}
     else
       key = Backend.normalize_path(path)
-      files = Agent.get(agent, & &1)
 
-      case Map.get(files, key) do
-        %{content: content, mtime: mtime} ->
-          {:ok, Backend.file_info(byte_size(content), NaiveDateTime.to_erl(mtime), :read_write)}
+      Agent.get(agent, fn files ->
+        case Map.get(files, key) do
+          %{content: content, mtime: mtime} ->
+            {:ok, Backend.file_info(byte_size(content), NaiveDateTime.to_erl(mtime), :read_write)}
 
-        nil ->
-          # Check if it's a directory
-          dir_prefix = key <> "/"
-
-          if Enum.any?(Map.keys(files), &String.starts_with?(&1, dir_prefix)) do
-            {:ok, Backend.directory_info()}
-          else
-            {:error, :enoent}
-          end
-      end
+          nil ->
+            if directory_exists?(files, key <> "/") do
+              {:ok, Backend.directory_info()}
+            else
+              {:error, :enoent}
+            end
+        end
+      end)
     end
   end
 
@@ -154,12 +161,13 @@ defmodule Sftpd.Backends.Memory do
   @spec read_file(Backend.path(), state()) :: {:ok, binary()} | {:error, :enoent}
   def read_file(path, %{agent: agent}) do
     key = Backend.normalize_path(path)
-    files = Agent.get(agent, & &1)
 
-    case Map.get(files, key) do
-      %{content: content} -> {:ok, content}
-      nil -> {:error, :enoent}
-    end
+    Agent.get(agent, fn files ->
+      case Map.get(files, key) do
+        %{content: content} -> {:ok, content}
+        nil -> {:error, :enoent}
+      end
+    end)
   end
 
   @impl true
@@ -178,5 +186,16 @@ defmodule Sftpd.Backends.Memory do
 
   defp normalize_prefix(path) do
     if Backend.root_path?(path), do: "", else: Backend.normalize_path(path) <> "/"
+  end
+
+  defp first_path_segment(path) do
+    case :binary.match(path, "/") do
+      {index, _length} -> binary_part(path, 0, index)
+      :nomatch -> path
+    end
+  end
+
+  defp directory_exists?(files, dir_prefix) do
+    Enum.any?(files, fn {path, _data} -> String.starts_with?(path, dir_prefix) end)
   end
 end

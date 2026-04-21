@@ -56,6 +56,27 @@ defmodule Sftpd.Backend do
       def handle_call({:write_file, path, content}, _from, state)
 
   Each should reply with the same format as the behaviour callbacks.
+
+  ## Optional Streaming Callbacks
+
+  Module backends can implement optional streaming callbacks for more efficient
+  large-file transfers:
+
+  - `read_file_range/4`
+  - `begin_write/2`
+  - `write_chunk/4`
+  - `finish_write/2`
+  - `abort_write/2`
+
+  When these callbacks are present, `Sftpd.IODevice` avoids buffering entire
+  files in memory for reads and most writes.
+
+  ## Close Semantics
+
+  Erlang's stock `:ssh_sftpd` server ignores the return value of
+  `file_handler.close/2` and always reports close success to the client. Write
+  failures can therefore only be surfaced reliably during active writes, not on
+  close/final multipart completion.
   """
 
   @typedoc "Backend state, returned from init/1 and threaded through all calls"
@@ -63,6 +84,9 @@ defmodule Sftpd.Backend do
 
   @typedoc "SFTP path as charlist"
   @type path :: charlist()
+
+  @typedoc "Opaque backend-managed write handle used by optional streaming callbacks"
+  @type writer_handle :: term()
 
   @typedoc "Erlang file_info tuple"
   @type file_info ::
@@ -117,7 +141,7 @@ defmodule Sftpd.Backend do
   Read the entire contents of a file.
 
   For large files, consider implementing streaming in your backend
-  and using the `read_file_stream/2` optional callback.
+  and using the `read_file_range/4` optional callback.
   """
   @callback read_file(path(), state()) :: {:ok, binary()} | {:error, atom()}
 
@@ -125,6 +149,44 @@ defmodule Sftpd.Backend do
   Write content to a file, creating or overwriting it.
   """
   @callback write_file(path(), content :: binary(), state()) :: :ok | {:error, atom()}
+
+  @doc """
+  Read a byte range from a file.
+
+  This is an optional callback used to avoid buffering entire files in memory.
+  Return `:eof` when the requested offset is at or past the end of the file.
+  """
+  @callback read_file_range(path(), offset :: non_neg_integer(), len :: pos_integer(), state()) ::
+              {:ok, binary()} | :eof | {:error, atom()}
+
+  @doc """
+  Begin a streaming write operation.
+
+  The returned writer handle is passed back to subsequent streaming write callbacks.
+  """
+  @callback begin_write(path(), state()) :: {:ok, writer_handle()} | {:error, atom()}
+
+  @doc """
+  Append a chunk to a streaming write operation at the given offset.
+  """
+  @callback write_chunk(writer_handle(), offset :: non_neg_integer(), iodata(), state()) ::
+              {:ok, writer_handle()} | {:error, atom()}
+
+  @doc """
+  Finalize a streaming write operation.
+  """
+  @callback finish_write(writer_handle(), state()) :: :ok | {:error, atom()}
+
+  @doc """
+  Abort a streaming write operation.
+  """
+  @callback abort_write(writer_handle(), state()) :: :ok
+
+  @optional_callbacks read_file_range: 4,
+                      begin_write: 2,
+                      write_chunk: 4,
+                      finish_write: 2,
+                      abort_write: 2
 
   # Helper functions for building file_info tuples
 
@@ -195,6 +257,19 @@ defmodule Sftpd.Backend do
   @spec normalize_path(path() | String.t()) :: String.t()
   def normalize_path(path) do
     path |> to_string() |> String.trim_leading("/")
+  end
+
+  @doc """
+  Return true when a module backend implements the given optional callback.
+
+  Process-based backends use the legacy callback contract only.
+  """
+  @spec supports_callback?(module() | {:genserver, GenServer.server()}, atom(), arity()) ::
+          boolean()
+  def supports_callback?({:genserver, _server}, _function, _arity), do: false
+
+  def supports_callback?(module, function, arity) when is_atom(module) do
+    function_exported?(module, function, arity)
   end
 
   # Backend dispatch helpers

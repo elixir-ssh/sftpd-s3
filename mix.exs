@@ -27,7 +27,7 @@ defmodule Sftpd.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :ssh]
+      extra_applications: [:crypto, :logger, :ssh]
     ]
   end
 
@@ -47,7 +47,8 @@ defmodule Sftpd.MixProject do
       # Dev/test dependencies
       {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.30", only: :dev, runtime: false},
-      {:mox, "~> 1.0", only: :test}
+      {:mox, "~> 1.0", only: :test},
+      {:stream_data, "~> 1.1", only: :test}
     ]
   end
 
