@@ -45,13 +45,17 @@ defmodule Sftpd.FileHandlerTest do
   defmodule ControlledCloseDevice do
     use GenServer
 
-    def start(test_pid), do: GenServer.start(__MODULE__, test_pid)
+    def start(test_pid, release_delay \\ nil), do: GenServer.start(__MODULE__, {test_pid, release_delay})
 
     @impl true
-    def init(test_pid), do: {:ok, %{test_pid: test_pid}}
+    def init({test_pid, release_delay}), do: {:ok, %{test_pid: test_pid, release_delay: release_delay}}
 
     @impl true
     def handle_call(:close, _from, state) do
+      if state.release_delay do
+        Process.send_after(self(), :release_close, state.release_delay)
+      end
+
       receive do
         :release_close -> {:stop, :normal, :ok, state}
       end
@@ -103,9 +107,8 @@ defmodule Sftpd.FileHandlerTest do
   describe "close/2" do
     property "timed-out close can still finish cleanly within the cleanup grace" do
       check all(release_delay <- integer(25..50), max_runs: 10) do
-        {:ok, pid} = ControlledCloseDevice.start(self())
+        {:ok, pid} = ControlledCloseDevice.start(self(), release_delay)
         ref = Process.monitor(pid)
-        Process.send_after(pid, :release_close, release_delay)
 
         capture_log(fn ->
           assert {{:error, :timeout}, _state} =
@@ -122,7 +125,7 @@ defmodule Sftpd.FileHandlerTest do
     end
 
     test "returns timeout but allows a slow close to clean up during the grace window" do
-      {:ok, pid} = SlowCloseDevice.start()
+      {:ok, pid} = ControlledCloseDevice.start(self(), 50)
       ref = Process.monitor(pid)
 
       log =
