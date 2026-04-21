@@ -53,29 +53,14 @@ defmodule Sftpd.FileHandler do
 
     pid =
       spawn(fn ->
-        result =
-          try do
-            {:ok, GenServer.call(io_device, :close, :infinity)}
-          catch
-            :exit, reason -> {:exit, reason}
-          end
-
-        send(caller, {ref, self(), result})
+        send(caller, {ref, self(), call_close(io_device)})
       end)
-
-    monitor = Process.monitor(pid)
 
     receive do
       {^ref, ^pid, {:ok, result}} ->
-        Process.demonitor(monitor, [:flush])
         result
 
       {^ref, ^pid, {:exit, reason}} ->
-        Process.demonitor(monitor, [:flush])
-        Logger.error("IODevice close failed for #{inspect(io_device)}: #{inspect(reason)}")
-        {:error, :eio}
-
-      {:DOWN, ^monitor, :process, ^pid, reason} ->
         Logger.error("IODevice close failed for #{inspect(io_device)}: #{inspect(reason)}")
         {:error, :eio}
     after
@@ -85,9 +70,16 @@ defmodule Sftpd.FileHandler do
         )
 
         Process.exit(pid, :kill)
-        Process.demonitor(monitor, [:flush])
         terminate_timed_out_device(io_device, shutdown_grace)
         {:error, :timeout}
+    end
+  end
+
+  defp call_close(io_device) do
+    try do
+      {:ok, GenServer.call(io_device, :close, :infinity)}
+    catch
+      :exit, reason -> {:exit, reason}
     end
   end
 
