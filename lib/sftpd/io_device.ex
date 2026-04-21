@@ -311,9 +311,16 @@ defmodule Sftpd.IODevice do
        }) do
     with {:ok, writer_handle} <- Backend.call(backend, :begin_write, [path, backend_state]),
          {:ok, writer_handle} <-
-           replay_tempfile_chunks(temp_fd, size, writer_handle, backend, backend_state, 0),
-         :ok <- Backend.call(backend, :finish_write, [writer_handle, backend_state]) do
-      :ok
+           replay_tempfile_chunks(temp_fd, size, writer_handle, backend, backend_state, 0) do
+      case Backend.call(backend, :finish_write, [writer_handle, backend_state]) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error("Failed to replay temp file for #{inspect(path)}: #{inspect(reason)}")
+          safe_abort_write(backend, writer_handle, backend_state)
+          {:error, reason}
+      end
     else
       {:stream_error, writer_handle, reason} ->
         Logger.error("Failed to replay temp file for #{inspect(path)}: #{inspect(reason)}")

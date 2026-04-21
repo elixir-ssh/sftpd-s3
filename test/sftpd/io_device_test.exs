@@ -158,6 +158,34 @@ defmodule Sftpd.IODeviceTest do
     def abort_write(_handle, _state), do: :ok
   end
 
+  defmodule ReplayFinishErrorBackend do
+    def begin_write(_path, %{agent: agent, test_pid: test_pid}) do
+      Agent.get_and_update(agent, fn attempts ->
+        next_attempt = attempts + 1
+
+        result =
+          case next_attempt do
+            1 -> {:error, :fallback_once}
+            _ -> {:ok, %{chunks: [], test_pid: test_pid}}
+          end
+
+        {result, next_attempt}
+      end)
+    end
+
+    def write_chunk(handle, offset, chunk, _state) do
+      data = IO.iodata_to_binary(chunk)
+      {:ok, %{handle | chunks: handle.chunks ++ [{offset, data}]}}
+    end
+
+    def finish_write(_handle, _state), do: {:error, :eio}
+
+    def abort_write(handle, _state) do
+      send(handle.test_pid, {:replay_finish_error_abort, handle.chunks})
+      :ok
+    end
+  end
+
   describe "read mode" do
     property "buffered reads return the original content across arbitrary read sizes" do
       check all(
@@ -682,6 +710,27 @@ defmodule Sftpd.IODeviceTest do
         end)
 
       assert log =~ "Failed to replay temp file"
+    end
+
+    test "aborts replayed streaming writes when finish_write fails" do
+      {:ok, agent} = Agent.start_link(fn -> 0 end)
+
+      log =
+        capture_log(fn ->
+          {:ok, pid} =
+            IODevice.start(%{
+              path: ~c"/stream.txt",
+              mode: :write,
+              backend: ReplayFinishErrorBackend,
+              backend_state: %{agent: agent, test_pid: self()}
+            })
+
+          assert :ok = GenServer.call(pid, {:write, "hello"})
+          assert {:error, :eio} = GenServer.call(pid, :close)
+        end)
+
+      assert log =~ "Failed to replay temp file"
+      assert_receive {:replay_finish_error_abort, [{0, "hello"}]}
     end
 
     test "returns an error instead of looping when temp replay hits unexpected eof" do

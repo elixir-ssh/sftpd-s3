@@ -277,8 +277,13 @@ defmodule Sftpd.Backends.S3 do
           pending_size: writer.pending_size - @multipart_part_size
       }
 
-      with {:ok, writer} <- upload_part(writer, part, state) do
-        flush_full_parts(writer, state)
+      case upload_part(writer, part, state) do
+        {:ok, writer} ->
+          flush_full_parts(writer, state)
+
+        {:error, reason} ->
+          abort_write(writer, state)
+          {:error, reason}
       end
     end
   end

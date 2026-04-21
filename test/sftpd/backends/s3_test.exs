@@ -494,6 +494,30 @@ defmodule Sftpd.Backends.S3Test do
       assert {:error, :eacces} = S3.write_chunk(writer, 0, chunk, state)
     end
 
+    test "write_chunk aborts multipart uploads when part upload fails", %{state: state} do
+      assert {:ok, writer} = S3.begin_write(~c"/large.bin", state)
+
+      expect(MockExAws, :request, fn op ->
+        assert op.http_method == :post
+        {:ok, %{body: %{upload_id: "upload-1"}}}
+      end)
+
+      expect(MockExAws, :request, fn op ->
+        assert op.http_method == :put
+        assert op.params["uploadId"] == "upload-1"
+        {:error, {:http_error, 500, %{}}}
+      end)
+
+      expect(MockExAws, :request, fn op ->
+        assert op.http_method == :delete
+        assert op.params["uploadId"] == "upload-1"
+        {:ok, %{}}
+      end)
+
+      chunk = :binary.copy(<<1>>, @multipart_part_size)
+      assert {:error, :eio} = S3.write_chunk(writer, 0, chunk, state)
+    end
+
     test "write_chunk rejects non-sequential offsets", %{state: state} do
       writer = %{
         bucket: "test-bucket",
