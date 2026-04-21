@@ -409,12 +409,26 @@ defmodule Sftpd.IODevice do
 
     case Map.get(state, :temp_path) do
       nil -> state
-      temp_path -> File.rm(temp_path)
+      temp_path -> remove_temp_file(temp_path)
     end
 
     state
     |> Map.delete(:temp_fd)
     |> Map.delete(:temp_path)
+  end
+
+  defp remove_temp_file(temp_path) do
+    case File.rm(temp_path) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to remove temp file #{inspect(temp_path)}: #{inspect(reason)}")
+        :ok
+    end
   end
 
   defp close_fd(nil), do: :ok

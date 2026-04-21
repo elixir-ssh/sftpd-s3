@@ -508,6 +508,34 @@ defmodule Sftpd.IODeviceTest do
       assert :ok = GenServer.call(pid, :close)
     end
 
+    test "logs temp file removal failures" do
+      temp_dir = Path.join(System.tmp_dir!(), "sftpd-test-#{System.unique_integer([:positive])}")
+      File.mkdir!(temp_dir)
+
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/output.txt",
+          mode: :write,
+          backend: MockBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      %{temp_path: original_temp_path} = :sys.get_state(pid)
+
+      :sys.replace_state(pid, fn state ->
+        %{state | temp_path: temp_dir}
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, _reason} = GenServer.call(pid, :close)
+        end)
+
+      assert log =~ "Failed to remove temp file"
+      File.rm(original_temp_path)
+      File.rmdir!(temp_dir)
+    end
+
     test "does not upload buffered content on terminate" do
       {:ok, pid} =
         IODevice.start(%{

@@ -140,6 +140,26 @@ defmodule Sftpd.FileHandlerTest do
       assert log =~ "Timed out waiting 10ms"
     end
 
+    test "does not leave late close replies in the caller mailbox after timeout" do
+      {:ok, pid} = SlowCloseDevice.start()
+      ref = Process.monitor(pid)
+
+      capture_log(fn ->
+        assert {{:error, :timeout}, _state} =
+                 FileHandler.close(pid, %{
+                   backend: nil,
+                   backend_state: nil,
+                   close_timeout: 10,
+                   close_shutdown_grace: 200
+                 })
+      end)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
+      Process.sleep(100)
+      refute_received {_tag, :ok}
+      refute_received {:ok, _}
+    end
+
     test "kills the device when cleanup grace also expires" do
       {:ok, pid} = HangingCloseDevice.start()
       ref = Process.monitor(pid)
