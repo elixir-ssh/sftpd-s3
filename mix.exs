@@ -43,6 +43,7 @@ defmodule Sftpd.MixProject do
       {:sweet_xml, "~> 0.6", optional: true},
       {:jason, "~> 1.3", optional: true},
       {:configparser_ex, "~> 4.0", optional: true},
+      {:telemetry, ">= 0.4.3 and < 2.0.0", optional: true},
 
       # Dev/test dependencies
       {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
@@ -78,7 +79,7 @@ defmodule Sftpd.MixProject do
       extras: ["README.md"],
       source_ref: "v#{@version}",
       groups_for_modules: [
-        Core: [Sftpd, Sftpd.Backend],
+        Core: [Sftpd, Sftpd.Backend, Sftpd.Telemetry],
         Backends: [Sftpd.Backends.S3, Sftpd.Backends.Memory],
         Internal: [Sftpd.FileHandler, Sftpd.IODevice],
         Legacy: [SftpdS3]

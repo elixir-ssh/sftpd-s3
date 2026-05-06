@@ -188,9 +188,19 @@ defmodule Sftpd.IODevice do
     {:reply, {:error, reason}, state}
   end
 
-  def handle_call({:write, data}, _from, %{mode: :write} = state) do
-    bytes = IO.iodata_length(data)
+  def handle_call({:write, _data, _bytes}, _from, %{error: reason} = state) do
+    {:reply, {:error, reason}, state}
+  end
 
+  def handle_call({:write, data, bytes}, _from, %{mode: :write} = state) do
+    handle_write(data, bytes, state)
+  end
+
+  def handle_call({:write, data}, _from, %{mode: :write} = state) do
+    handle_write(data, IO.iodata_length(data), state)
+  end
+
+  defp handle_write(data, bytes, state) do
     with :ok <- persist_to_tempfile(state.temp_fd, state.position, data),
          {:ok, state} <- maybe_stream_write(state, data, bytes) do
       new_size = max(state.size, state.position + bytes)

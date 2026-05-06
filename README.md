@@ -108,6 +108,68 @@ If you need to bound how long close-time finalization can block a session, pass
 `close_timeout: timeout_in_ms` to `Sftpd.start_server/1`. The default is
 `30_000`.
 
+## Telemetry
+
+`Sftpd` emits `:telemetry` events for server lifecycle and SFTP operations.
+Telemetry support is optional: if the `:telemetry` module is unavailable at
+runtime, event emission is skipped and the SFTP server continues normally.
+
+If you want to attach handlers from an application that does not already depend
+on `:telemetry`, add it explicitly:
+
+```elixir
+def deps do
+  [
+    {:telemetry, ">= 0.4.3 and < 2.0.0"},
+    {:sftpd, "~> 0.2.0"}
+  ]
+end
+```
+
+- `[:sftpd, :server, :start]`
+- `[:sftpd, :server, :stop]`
+- `[:sftpd, :sftp, operation]` where `operation` is one of `:open`, `:close`,
+  `:read`, `:write`, `:list_dir`, `:read_file_info`, `:read_link_info`,
+  `:rename`, `:delete`, `:make_dir`, `:del_dir`, `:position`, `:is_dir`,
+  `:get_cwd`, `:make_symlink`, `:read_link`, or `:write_file_info`
+
+Every event includes `%{duration: native_time}` measurements. `:read` and
+`:write` also include `:bytes`.
+
+Common metadata for `[:sftpd, :sftp, operation]` events:
+
+- `:backend` and `:backend_kind` identify the configured backend
+- `:result` is usually `:ok`, `:error`, or `:eof`
+- `:reason` is present on error results when one is available
+
+Operation-specific metadata:
+
+- `:open` adds `:path`, `:requested_modes`, and normalized `:mode`
+- `:close` adds `:io_device`, `:close_timeout`, and `:close_shutdown_grace`
+- `:read` adds `:io_device` and `:bytes_requested`
+- `:write` adds `:io_device`
+- path-oriented operations add `:path`
+- `:rename` adds `:src_path` and `:dst_path`
+- `:position` adds `:io_device` and `:offset`
+- `:is_dir` reports `:result` as `:directory` or `:not_directory`
+
+Server lifecycle metadata:
+
+- `[:sftpd, :server, :start]` includes `:port`, `:max_sessions`, `:backend`,
+  `:backend_kind`, `:result`, and `:server_ref` on success
+- `[:sftpd, :server, :stop]` includes `:server_ref` and `:result`
+
+```elixir
+:telemetry.attach(
+  "sftpd-read-logger",
+  [:sftpd, :sftp, :read],
+  fn _event, measurements, metadata, _config ->
+    Logger.info("sftp read #{metadata.path} bytes=#{measurements.bytes} result=#{metadata.result}")
+  end,
+  nil
+)
+```
+
 ### Custom Backends
 
 Implement the `Sftpd.Backend` behaviour to create custom storage backends.
