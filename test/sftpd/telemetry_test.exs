@@ -23,9 +23,21 @@ defmodule Sftpd.TelemetryTest do
                    Telemetry.span([:sftpd, :test, :unstarted], %{base: :metadata}, fn ->
                      :ok
                    end)
+
+          assert :ok =
+                   Telemetry.span(
+                     [:sftpd, :test, :unstarted],
+                     %{base: :metadata},
+                     fn -> :ok end,
+                     fn result, _duration ->
+                       send(self(), {:finalize_called, result})
+                       {%{duration: 1}, %{result: :ok}}
+                     end
+                   )
         end)
 
       assert log == ""
+      refute_received {:finalize_called, :ok}
     end
 
     test "emits measurements and merged metadata for successful calls" do

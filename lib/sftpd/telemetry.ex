@@ -62,25 +62,31 @@ defmodule Sftpd.Telemetry do
   """
   @spec span(event_name(), metadata(), (-> term()), finalize_fun()) :: term()
   def span(event_name, metadata, fun, finalize_fun \\ &default_finalize/2) do
-    start = System.monotonic_time()
+    case telemetry_available?() do
+      true ->
+        start = System.monotonic_time()
 
-    try do
-      result = fun.()
-      duration = System.monotonic_time() - start
-      {measurements, extra_metadata} = finalize_fun.(result, duration)
-      execute(event_name, measurements, Map.merge(metadata, extra_metadata))
-      result
-    catch
-      kind, reason ->
-        duration = System.monotonic_time() - start
+        try do
+          result = fun.()
+          duration = System.monotonic_time() - start
+          {measurements, extra_metadata} = finalize_fun.(result, duration)
+          :telemetry.execute(event_name, measurements, Map.merge(metadata, extra_metadata))
+          result
+        catch
+          kind, reason ->
+            duration = System.monotonic_time() - start
 
-        execute(
-          event_name,
-          %{duration: duration},
-          Map.merge(metadata, %{result: :exception, kind: kind, reason: reason})
-        )
+            :telemetry.execute(
+              event_name,
+              %{duration: duration},
+              Map.merge(metadata, %{result: :exception, kind: kind, reason: reason})
+            )
 
-        :erlang.raise(kind, reason, __STACKTRACE__)
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
+
+      false ->
+        fun.()
     end
   end
 
