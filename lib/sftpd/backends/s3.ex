@@ -4,6 +4,9 @@ defmodule Sftpd.Backends.S3 do
 
   This backend supports efficient directory listings and optional streaming read
   and write callbacks for large file transfers.
+
+  See the `Backends` extra in HexDocs for package-level backend guidance and
+  `Telemetry` for the event reference emitted around S3-backed operations.
   """
 
   @behaviour Sftpd.Backend

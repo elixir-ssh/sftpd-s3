@@ -5,6 +5,9 @@ defmodule Sftpd.Telemetry do
   Telemetry is optional. If the `:telemetry` module is not available at runtime,
   these helpers become no-ops and the main library behavior is unchanged.
 
+  See the `Telemetry` extra in HexDocs for the full event reference, payload
+  details, examples, and caveats.
+
   The library emits these events:
 
   - `[:sftpd, :server, :start]`

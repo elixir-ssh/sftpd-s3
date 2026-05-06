@@ -22,6 +22,17 @@ defmodule Sftpd do
   - `Sftpd.Backends.S3` - Amazon S3 or S3-compatible storage
 
   To create a custom backend, implement the `Sftpd.Backend` behaviour.
+  See the HexDocs extras `Backends` and `Custom Backends` for package-level
+  guidance and examples.
+
+  ## Guides
+
+  Package-level HexDocs extras:
+
+  - `Getting Started`
+  - `Backends`
+  - `Custom Backends`
+  - `Telemetry`
 
   ## Options
 
@@ -42,6 +53,11 @@ defmodule Sftpd do
       Sftpd.start_server(backend: {:genserver, pid}, ...)
 
   See `Sftpd.Backend` for the messages your GenServer must handle.
+
+  ## Telemetry
+
+  See `Sftpd.Telemetry` and the `Telemetry` extra in HexDocs for the event
+  reference emitted by the server and file-handler layers.
 
   ## SSH Host Keys
 
