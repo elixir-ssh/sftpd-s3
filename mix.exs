@@ -8,7 +8,7 @@ defmodule Sftpd.MixProject do
     [
       app: :sftpd,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -69,14 +69,21 @@ defmodule Sftpd.MixProject do
       links: %{
         "GitHub" => @source_url
       },
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
+      files:
+        ~w(lib .formatter.exs mix.exs README.md GETTING_STARTED.md BACKENDS.md CUSTOM_BACKENDS.md TELEMETRY.md LICENSE)
     ]
   end
 
   defp docs do
     [
       main: "Sftpd",
-      extras: ["README.md"],
+      extras: [
+        "README.md",
+        "GETTING_STARTED.md",
+        "BACKENDS.md",
+        "CUSTOM_BACKENDS.md",
+        "TELEMETRY.md"
+      ],
       source_ref: "v#{@version}",
       groups_for_modules: [
         Core: [Sftpd, Sftpd.Backend, Sftpd.Telemetry],

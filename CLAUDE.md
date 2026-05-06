@@ -18,13 +18,13 @@ Sftpd is an Elixir library that provides a pluggable SFTP server with support fo
 
 ### Prerequisites
 
-- Erlang/OTP 28+ (see `.tool-versions` for exact version)
-- Elixir 1.19+ (see `.tool-versions` for exact version)
+- Erlang/OTP 28.5
+- Elixir 1.19.5 on OTP 28
 - LocalStack for S3 integration tests
 
 ### Version Management
 
-**Important:** `flake.nix` and `.tool-versions` must stay in sync. When updating Erlang or Elixir versions, update both files.
+**Important:** `flake.nix` and `.tool-versions` must stay in sync. The current pinned development environment is OTP 28.5 with Elixir 1.19.5-otp-28, while the verified minimum support target is Elixir 1.14.5 on OTP 26 and the package requirement remains `~> 1.14`.
 
 ### Running Tests
 

@@ -117,6 +117,10 @@ Special cases:
 - `:io_device`
 - `:bytes_requested`
 
+The `:read` event does not include `:path`. If you need path-level context for
+reads, correlate the `:io_device` back to the earlier `[:sftpd, :sftp, :open]`
+event for that handle.
+
 `[:sftpd, :sftp, :write]`
 
 - `:io_device`
@@ -162,7 +166,7 @@ Attach a single handler:
   [:sftpd, :sftp, :read],
   fn _event, measurements, metadata, _config ->
     Logger.info(
-      "sftp read path=#{metadata.path} bytes=#{measurements.bytes} result=#{metadata.result}"
+      "sftp read io_device=#{inspect(metadata.io_device)} bytes=#{measurements.bytes} result=#{metadata.result}"
     )
   end,
   nil
@@ -203,7 +207,7 @@ Convert durations before exporting metrics:
       System.convert_time_unit(measurements.duration, :native, :microsecond)
 
     Logger.info(
-      "read path=#{metadata.path} bytes=#{measurements.bytes} duration_us=#{duration_us}"
+      "read io_device=#{inspect(metadata.io_device)} bytes=#{measurements.bytes} duration_us=#{duration_us}"
     )
   end,
   nil

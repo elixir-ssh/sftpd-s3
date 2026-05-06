@@ -2,7 +2,24 @@
 
 A pluggable SFTP server for Elixir with support for S3 and custom backends.
 
+`Sftpd` wraps Erlang's `:ssh_sftpd` subsystem and lets you plug storage behind
+it through a small backend behaviour. It ships with:
+
+- an in-memory backend for development and tests
+- an S3 backend with range reads and multipart streaming writes
+- optional telemetry hooks around server lifecycle and SFTP operations
+
 ## Installation
+
+Version notes for this package:
+
+- verified minimum Elixir: `~> 1.14`
+- verified minimum OTP for CI: `26`
+- current pinned development environment: Erlang/OTP 28.5
+- current pinned development environment: Elixir 1.19.5 on OTP 28
+
+The package requirement is declared in `mix.exs`. The development environment
+is pinned in `.tool-versions`.
 
 ```elixir
 def deps do
@@ -26,6 +43,22 @@ end
 
 # Connect with: sftp -P 2222 dev@localhost
 ```
+
+## Guides
+
+- `GETTING_STARTED.md` for a step-by-step setup guide
+- `BACKENDS.md` for backend architecture and built-in backend tradeoffs
+- `CUSTOM_BACKENDS.md` for implementing your own backend
+- `TELEMETRY.md` for emitted events, metadata, and examples
+
+## Key Concepts
+
+- `Sftpd.start_server/1` starts an SSH daemon configured with an SFTP
+  file-handler
+- `Sftpd.Backend` defines the storage contract
+- `Sftpd.Backends.Memory` is the fastest local setup path
+- `Sftpd.Backends.S3` is the built-in persistent backend
+- `Sftpd.Telemetry` documents the optional instrumentation surface
 
 ## Backends
 
@@ -114,65 +147,27 @@ If you need to bound how long close-time finalization can block a session, pass
 Telemetry support is optional: if the `:telemetry` module is unavailable at
 runtime, event emission is skipped and the SFTP server continues normally.
 
-If you want to attach handlers from an application that does not already depend
-on `:telemetry`, add it explicitly:
-
-```elixir
-def deps do
-  [
-    {:telemetry, ">= 0.4.3 and < 2.0.0"},
-    {:sftpd, "~> 0.2.0"}
-  ]
-end
-```
-
-- `[:sftpd, :server, :start]`
-- `[:sftpd, :server, :stop]`
-- `[:sftpd, :sftp, operation]` where `operation` is one of `:open`, `:close`,
-  `:read`, `:write`, `:list_dir`, `:read_file_info`, `:read_link_info`,
-  `:rename`, `:delete`, `:make_dir`, `:del_dir`, `:position`, `:is_dir`,
-  `:get_cwd`, `:make_symlink`, `:read_link`, or `:write_file_info`
-
-Every event includes `%{duration: native_time}` measurements. `:read` and
-`:write` also include `:bytes`.
-
-Common metadata for `[:sftpd, :sftp, operation]` events:
-
-- `:backend` and `:backend_kind` identify the configured backend
-- `:result` is usually `:ok`, `:error`, or `:eof`
-- `:reason` is present on error results when one is available
-
-Operation-specific metadata:
-
-- `:open` adds `:path`, `:requested_modes`, and normalized `:mode`
-- `:close` adds `:io_device`, `:close_timeout`, and `:close_shutdown_grace`
-- `:read` adds `:io_device` and `:bytes_requested`
-- `:write` adds `:io_device`
-- path-oriented operations add `:path`
-- `:rename` adds `:src_path` and `:dst_path`
-- `:position` adds `:io_device` and `:offset`
-- `:is_dir` reports `:result` as `:directory` or `:not_directory`
-
-Server lifecycle metadata:
-
-- `[:sftpd, :server, :start]` includes `:port`, `:max_sessions`, `:backend`,
-  `:backend_kind`, `:result`, and `:server_ref` on success
-- `[:sftpd, :server, :stop]` includes `:server_ref` and `:result`
-
 ```elixir
 :telemetry.attach(
   "sftpd-read-logger",
   [:sftpd, :sftp, :read],
   fn _event, measurements, metadata, _config ->
-    Logger.info("sftp read #{metadata.path} bytes=#{measurements.bytes} result=#{metadata.result}")
+    Logger.info(
+      "sftp read io_device=#{inspect(metadata.io_device)} bytes=#{measurements.bytes} result=#{metadata.result}"
+    )
   end,
   nil
 )
 ```
 
+See the full telemetry event reference in `TELEMETRY.md` or
+`Sftpd.Telemetry`.
+
 ### Custom Backends
 
 Implement the `Sftpd.Backend` behaviour to create custom storage backends.
+See `BACKENDS.md` for backend overview and `CUSTOM_BACKENDS.md` for a full
+authoring guide.
 
 ## SSH Host Keys
 
