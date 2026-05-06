@@ -1,0 +1,15 @@
+{
+  "people": [],
+  "projects": [
+    "Sftpd",
+    "Sftpd.Backend",
+    "Sftpd.Backends.S3",
+    "Sftpd.Backends.Memory",
+    "Sftpd.FileHandler",
+    "Sftpd.IODevice",
+    "SftpdS3",
+    "ExAws",
+    "SFTP",
+    "S3"
+  ]
+}
