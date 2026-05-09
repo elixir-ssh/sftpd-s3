@@ -1,15 +1,29 @@
 defmodule Sftpd.FileHandlerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   use ExUnitProperties
 
   import ExUnit.CaptureLog
 
   alias Sftpd.FileHandler
+  alias Sftpd.Test.TelemetryHelper
 
   @state %{backend: nil, backend_state: nil}
 
   defmodule MockBackend do
     def read_file(_path, _state), do: {:ok, "content"}
+    def list_dir(_path, _state), do: {:ok, [~c".", ~c"..", ~c"entry"]}
+    def make_dir(_path, _state), do: :ok
+    def del_dir(_path, _state), do: :ok
+    def delete(_path, _state), do: :ok
+    def rename(_src, _dst, _state), do: :ok
+
+    def file_info(~c"/dir", _state),
+      do: {:ok, {:file_info, 4096, :directory, :read, {}, {}, {}, 0, 0, 0, 0, 0, 0, 0}}
+
+    def file_info(~c"/file", _state),
+      do: {:ok, {:file_info, 3, :regular, :read_write, {}, {}, {}, 0, 0, 0, 0, 0, 0, 0}}
+
+    def file_info(_path, _state), do: {:error, :enoent}
   end
 
   defmodule SlowCloseDevice do
@@ -95,6 +109,19 @@ defmodule Sftpd.FileHandlerTest do
       {{:ok, cwd}, _new_state} = FileHandler.get_cwd(state)
       assert cwd == ~c"/home/user"
     end
+
+    test "emits telemetry for cwd lookups" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :get_cwd]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      {{:ok, cwd}, _new_state} = FileHandler.get_cwd(@state)
+
+      assert cwd == ~c"/"
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :get_cwd], measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.result == :ok
+      assert metadata.backend_kind == :module
+    end
   end
 
   describe "open/3" do
@@ -103,6 +130,112 @@ defmodule Sftpd.FileHandlerTest do
       {{:ok, pid}, _state} = FileHandler.open(~c"/file.txt", [], state)
       assert Process.alive?(pid)
       GenServer.stop(pid)
+    end
+
+    test "emits telemetry for open" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :open]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: MockBackend, backend_state: %{}}
+      {{:ok, pid}, _state} = FileHandler.open(~c"/file.txt", [], state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :open], measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.result == :ok
+      assert metadata.mode == :read
+      assert metadata.path == "/file.txt"
+      assert metadata.backend == MockBackend
+
+      GenServer.stop(pid)
+    end
+  end
+
+  describe "path operation telemetry" do
+    test "emits telemetry for backend path operations" do
+      handler_id =
+        TelemetryHelper.attach(self(), [
+          [:sftpd, :sftp, :list_dir],
+          [:sftpd, :sftp, :make_dir],
+          [:sftpd, :sftp, :delete],
+          [:sftpd, :sftp, :rename]
+        ])
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: MockBackend, backend_state: %{}}
+
+      assert {{:ok, [~c".", ~c"..", ~c"entry"]}, ^state} = FileHandler.list_dir(~c"/items", state)
+      assert {:ok, ^state} = FileHandler.make_dir(~c"/items", state)
+      assert {:ok, ^state} = FileHandler.delete(~c"/items/file.txt", state)
+      assert {:ok, ^state} = FileHandler.rename(~c"/old.txt", ~c"/new.txt", state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :list_dir], list_measurements,
+                      list_metadata}
+
+      assert is_integer(list_measurements.duration)
+      assert list_metadata.path == "/items"
+      assert list_metadata.result == :ok
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :make_dir], make_measurements,
+                      make_metadata}
+
+      assert is_integer(make_measurements.duration)
+      assert make_metadata.path == "/items"
+      assert make_metadata.result == :ok
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :delete], delete_measurements,
+                      delete_metadata}
+
+      assert is_integer(delete_measurements.duration)
+      assert delete_metadata.path == "/items/file.txt"
+      assert delete_metadata.result == :ok
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :rename], rename_measurements,
+                      rename_metadata}
+
+      assert is_integer(rename_measurements.duration)
+      assert rename_metadata.src_path == "/old.txt"
+      assert rename_metadata.dst_path == "/new.txt"
+      assert rename_metadata.result == :ok
+    end
+
+    test "emits only a read_file_info event for file info lookups" do
+      handler_id =
+        TelemetryHelper.attach(self(), [
+          [:sftpd, :sftp, :read_file_info],
+          [:sftpd, :sftp, :read_link_info]
+        ])
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: MockBackend, backend_state: %{}}
+
+      assert {{:ok, {:file_info, 3, :regular, :read_write, {}, {}, {}, 0, 0, 0, 0, 0, 0, 0}},
+              ^state} = FileHandler.read_file_info(~c"/file", state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :read_file_info], measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.path == "/file"
+      assert metadata.result == :ok
+      refute_receive {:telemetry_event, [:sftpd, :sftp, :read_link_info], _, _}
+    end
+
+    test "emits telemetry for directory checks" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :is_dir]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: MockBackend, backend_state: %{}}
+
+      assert {true, ^state} = FileHandler.is_dir(~c"/dir", state)
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :is_dir], measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.path == "/dir"
+      assert metadata.result == :directory
+
+      assert {false, ^state} = FileHandler.is_dir(~c"/missing", state)
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :is_dir], _, metadata}
+      assert metadata.path == "/missing"
+      assert metadata.result == :not_directory
     end
   end
 
@@ -182,6 +315,30 @@ defmodule Sftpd.FileHandlerTest do
 
       assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1000
       assert log =~ "did not close within 10ms cleanup grace"
+    end
+
+    test "emits telemetry for close timeouts" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :close]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      {:ok, pid} = HangingCloseDevice.start()
+
+      capture_log(fn ->
+        assert {{:error, :timeout}, _state} =
+                 FileHandler.close(pid, %{
+                   backend: nil,
+                   backend_state: nil,
+                   close_timeout: 10,
+                   close_shutdown_grace: 10
+                 })
+      end)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :close], measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.result == :error
+      assert metadata.reason == :timeout
+      assert metadata.close_timeout == 10
+      assert metadata.close_shutdown_grace == 10
     end
   end
 end

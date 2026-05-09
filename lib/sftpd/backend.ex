@@ -2,6 +2,9 @@ defmodule Sftpd.Backend do
   @moduledoc """
   Behaviour for SFTP storage backends.
 
+  See the HexDocs extras `Backends` and `Custom Backends` for package-level
+  guidance before implementing this behaviour directly.
+
   Implement this behaviour to create custom storage backends for the SFTP server.
   Built-in backends include:
 
@@ -112,7 +115,7 @@ defmodule Sftpd.Backend do
   @doc """
   Get file or directory information.
 
-  Returns an Erlang file_info tuple. Use `Sftpd.Backend.file_info/4` or
+  Returns an Erlang file_info tuple. Use `Sftpd.Backend.file_info/3` or
   `Sftpd.Backend.directory_info/0` helpers to construct these.
   """
   @callback file_info(path(), state()) :: {:ok, file_info()} | {:error, atom()}
@@ -217,6 +220,11 @@ defmodule Sftpd.Backend do
         inode,          # Inode number (random for virtual filesystems)
         uid,            # Owner user ID
         gid}            # Owner group ID
+
+  ## Examples
+
+      iex> {:file_info, 12, :regular, :read_write, {{2024, 1, 1}, {0, 0, 0}}, _, _, _, _, _, _, _, _, _} =
+      ...>   Sftpd.Backend.file_info(12, {{2024, 1, 1}, {0, 0, 0}})
   """
   @spec file_info(non_neg_integer(), :calendar.datetime(), :read | :write | :read_write) ::
           file_info()
@@ -245,6 +253,14 @@ defmodule Sftpd.Backend do
   Return true if the path refers to the root directory.
 
   Handles all common root path representations used by SFTP clients.
+
+  ## Examples
+
+      iex> Sftpd.Backend.root_path?(~c"/")
+      true
+
+      iex> Sftpd.Backend.root_path?(~c"/nested")
+      false
   """
   @spec root_path?(path()) :: boolean()
   def root_path?(path), do: path in [~c"/", ~c"/.", ~c"/..", ~c"..", ~c".", ~c""]
@@ -253,6 +269,14 @@ defmodule Sftpd.Backend do
   Normalize an SFTP path to a string without leading slash.
 
   Useful for backends that use string keys (like S3).
+
+  ## Examples
+
+      iex> Sftpd.Backend.normalize_path(~c"/folder/file.txt")
+      "folder/file.txt"
+
+      iex> Sftpd.Backend.normalize_path("already/normalized")
+      "already/normalized"
   """
   @spec normalize_path(path() | String.t()) :: String.t()
   def normalize_path(path) do

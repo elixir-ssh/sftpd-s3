@@ -1,6 +1,8 @@
 defmodule SftpdTest do
   use ExUnit.Case, async: false
 
+  alias Sftpd.Test.TelemetryHelper
+
   @client_opts [
     silently_accept_hosts: true,
     user: ~c"testuser",
@@ -171,6 +173,71 @@ defmodule SftpdTest do
                  system_dir: "/tmp",
                  users: []
                )
+    end
+
+    test "emits telemetry for start errors" do
+      handler_id =
+        TelemetryHelper.attach(self(), [
+          [:sftpd, :server, :start]
+        ])
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert {:error, :init_failed} =
+               Sftpd.start_server(
+                 backend: FailingBackend,
+                 system_dir: "/tmp",
+                 users: []
+               )
+
+      assert_receive {:telemetry_event, [:sftpd, :server, :start], measurements, metadata}
+      assert is_integer(measurements.duration)
+      assert metadata.result == :error
+      assert metadata.reason == :init_failed
+      assert metadata.backend == FailingBackend
+      assert metadata.backend_kind == :module
+    end
+  end
+
+  describe "telemetry" do
+    test "emits start and stop server events" do
+      handler_id =
+        TelemetryHelper.attach(self(), [
+          [:sftpd, :server, :start],
+          [:sftpd, :server, :stop]
+        ])
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      port = 10_000 + :rand.uniform(10_000)
+      system_dir = Sftpd.Test.SSHKeys.generate_system_dir()
+
+      assert {:ok, ref} =
+               Sftpd.start_server(
+                 port: port,
+                 backend: Sftpd.Backends.Memory,
+                 backend_opts: [],
+                 users: [{"testuser", "testpass"}],
+                 system_dir: system_dir
+               )
+
+      assert_receive {:telemetry_event, [:sftpd, :server, :start], start_measurements,
+                      start_metadata}
+
+      assert is_integer(start_measurements.duration)
+      assert start_metadata.result == :ok
+      assert start_metadata.port == port
+      assert start_metadata.backend == Sftpd.Backends.Memory
+      assert start_metadata.server_ref == ref
+
+      assert :ok = Sftpd.stop_server(ref)
+
+      assert_receive {:telemetry_event, [:sftpd, :server, :stop], stop_measurements,
+                      stop_metadata}
+
+      assert is_integer(stop_measurements.duration)
+      assert stop_metadata.result == :ok
+      assert stop_metadata.server_ref == ref
     end
   end
 

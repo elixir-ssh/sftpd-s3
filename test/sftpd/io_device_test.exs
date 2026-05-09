@@ -1,10 +1,12 @@
 defmodule Sftpd.IODeviceTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   use ExUnitProperties
 
   import ExUnit.CaptureLog
 
   alias Sftpd.IODevice
+  alias Sftpd.FileHandler
+  alias Sftpd.Test.TelemetryHelper
 
   defmodule MockBackend do
     def read_file(_path, %{content: content}), do: {:ok, content}
@@ -267,6 +269,41 @@ defmodule Sftpd.IODeviceTest do
       assert :eof = GenServer.call(pid, {:read, 5})
     end
 
+    test "file handler emits telemetry for reads" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :read]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: MockBackend, backend_state: %{content: "hello world"}}
+      {{:ok, pid}, _state} = FileHandler.open(~c"/test.txt", [:read], state)
+
+      assert {{:ok, "hello"}, _state} = FileHandler.read(pid, 5, state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :read], measurements, metadata}
+      assert measurements.bytes == 5
+      assert metadata.result == :ok
+      assert metadata.bytes_requested == 5
+      assert metadata.backend == MockBackend
+
+      GenServer.stop(pid)
+    end
+
+    test "file handler emits eof telemetry for reads" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :read]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: RangeEmptyBackend, backend_state: %{}}
+      {{:ok, pid}, _state} = FileHandler.open(~c"/range.txt", [:read], state)
+
+      assert {:eof, ^state} = FileHandler.read(pid, 3, state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :read], measurements, metadata}
+      assert measurements.bytes == 0
+      assert metadata.result == :eof
+      assert metadata.reason == nil
+
+      GenServer.stop(pid)
+    end
+
     test "uses read_file_range when the backend supports it" do
       {:ok, pid} =
         IODevice.start(%{
@@ -492,6 +529,40 @@ defmodule Sftpd.IODeviceTest do
       refute_receive {:written, _}, 200
     end
 
+    test "file handler emits telemetry for writes" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :write]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: MockBackend, backend_state: %{test_pid: self()}}
+      {{:ok, pid}, _state} = FileHandler.open(~c"/output.txt", [:write], state)
+
+      assert {:ok, _state} = FileHandler.write(pid, "hello", state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :write], measurements, metadata}
+      assert measurements.bytes == 5
+      assert metadata.result == :ok
+      assert metadata.backend == MockBackend
+
+      assert :ok = GenServer.call(pid, :close)
+    end
+
+    test "file handler emits error telemetry for failed writes" do
+      handler_id = TelemetryHelper.attach(self(), [[:sftpd, :sftp, :write]])
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      state = %{backend: StreamingWriteErrorBackend, backend_state: %{test_pid: self()}}
+      {{:ok, pid}, _state} = FileHandler.open(~c"/output.txt", [:write], state)
+
+      assert {{:error, :eio}, ^state} = FileHandler.write(pid, "hello", state)
+
+      assert_receive {:telemetry_event, [:sftpd, :sftp, :write], measurements, metadata}
+      assert measurements.bytes == 5
+      assert metadata.result == :error
+      assert metadata.reason == :eio
+
+      GenServer.stop(pid)
+    end
+
     test "creates temp files with owner-only permissions" do
       {:ok, pid} =
         IODevice.start(%{
@@ -698,6 +769,23 @@ defmodule Sftpd.IODeviceTest do
 
       assert log =~ "Streaming write failed"
       assert log =~ "Failed to abort streaming write"
+    end
+
+    test "preserves write errors for precomputed-byte write calls" do
+      {:ok, pid} =
+        IODevice.start(%{
+          path: ~c"/stream.txt",
+          mode: :write,
+          backend: StreamingWriteErrorBackend,
+          backend_state: %{test_pid: self()}
+        })
+
+      capture_log(fn ->
+        assert {:error, :eio} = GenServer.call(pid, {:write, "hello"})
+        assert {:error, :eio} = GenServer.call(pid, {:write, "world", 5})
+      end)
+
+      GenServer.stop(pid)
     end
 
     test "returns errors when finish_write fails" do

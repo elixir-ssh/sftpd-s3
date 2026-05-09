@@ -26,3 +26,6 @@ sftpd_s3-*.tar
 /tmp/
 .direnv
 .expert/
+
+# Keep MemPalace from indexing the large transfer fixture as thousands of drawers.
+/test/fixtures/1mb.txt

@@ -27,6 +27,9 @@ defmodule Sftpd.Backends.Memory do
       }
 
   Directories are represented by `.keep` marker files (like S3).
+
+  See the `Backends` and `Custom Backends` extras in HexDocs for how this
+  backend fits into the wider package model.
   """
 
   @behaviour Sftpd.Backend

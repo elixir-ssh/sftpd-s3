@@ -22,6 +22,17 @@ defmodule Sftpd do
   - `Sftpd.Backends.S3` - Amazon S3 or S3-compatible storage
 
   To create a custom backend, implement the `Sftpd.Backend` behaviour.
+  See the HexDocs extras `Backends` and `Custom Backends` for package-level
+  guidance and examples.
+
+  ## Guides
+
+  Package-level HexDocs extras:
+
+  - `Getting Started`
+  - `Backends`
+  - `Custom Backends`
+  - `Telemetry`
 
   ## Options
 
@@ -43,6 +54,11 @@ defmodule Sftpd do
 
   See `Sftpd.Backend` for the messages your GenServer must handle.
 
+  ## Telemetry
+
+  See `Sftpd.Telemetry` and the `Telemetry` extra in HexDocs for the event
+  reference emitted by the server and file-handler layers.
+
   ## SSH Host Keys
 
   You need SSH host keys for the server. Generate them with:
@@ -55,6 +71,7 @@ defmodule Sftpd do
 
   @default_port 22
   @default_max_sessions 10
+  @server_event_prefix [:sftpd, :server]
 
   @type server_ref :: :ssh.daemon_ref()
 
@@ -91,24 +108,38 @@ defmodule Sftpd do
         {to_charlist(user), to_charlist(pass)}
       end)
 
-    with {:ok, {backend, backend_state}} <- init_backend(backend, backend_opts) do
-      :ssh.daemon(port, [
-        {:max_sessions, max_sessions},
-        {:user_passwords, user_passwords},
-        {:system_dir, to_charlist(system_dir)},
-        {:subsystems,
-         [
-           :ssh_sftpd.subsystem_spec(
-             cwd: ~c"/",
-             root: ~c"/",
-             file_handler: {
-               Sftpd.FileHandler,
-               %{backend: backend, backend_state: backend_state, close_timeout: close_timeout}
-             }
-           )
-         ]}
-      ])
-    end
+    metadata = %{
+      port: port,
+      max_sessions: max_sessions,
+      backend: backend_name(backend),
+      backend_kind: backend_kind(backend)
+    }
+
+    Sftpd.Telemetry.span(
+      @server_event_prefix ++ [:start],
+      metadata,
+      fn ->
+        with {:ok, {backend, backend_state}} <- init_backend(backend, backend_opts) do
+          :ssh.daemon(port, [
+            {:max_sessions, max_sessions},
+            {:user_passwords, user_passwords},
+            {:system_dir, to_charlist(system_dir)},
+            {:subsystems,
+             [
+               :ssh_sftpd.subsystem_spec(
+                 cwd: ~c"/",
+                 root: ~c"/",
+                 file_handler: {
+                   Sftpd.FileHandler,
+                   %{backend: backend, backend_state: backend_state, close_timeout: close_timeout}
+                 }
+               )
+             ]}
+          ])
+        end
+      end,
+      &server_finalize/2
+    )
   end
 
   defp init_backend({:genserver, server}, _opts) do
@@ -134,6 +165,30 @@ defmodule Sftpd do
   """
   @spec stop_server(server_ref()) :: :ok | {:error, term()}
   def stop_server(ref) do
-    :ssh.stop_daemon(ref)
+    Sftpd.Telemetry.span(
+      @server_event_prefix ++ [:stop],
+      %{server_ref: ref},
+      fn ->
+        :ssh.stop_daemon(ref)
+      end,
+      &stop_finalize/2
+    )
   end
+
+  defp server_finalize({:ok, ref}, duration),
+    do: {%{duration: duration}, %{result: :ok, server_ref: ref}}
+
+  defp server_finalize({:error, reason}, duration),
+    do: {%{duration: duration}, %{result: :error, reason: reason}}
+
+  defp stop_finalize(:ok, duration), do: {%{duration: duration}, %{result: :ok}}
+
+  defp stop_finalize({:error, reason}, duration),
+    do: {%{duration: duration}, %{result: :error, reason: reason}}
+
+  defp backend_kind({:genserver, _server}), do: :genserver
+  defp backend_kind(module) when is_atom(module), do: :module
+
+  defp backend_name({:genserver, server}), do: inspect(server)
+  defp backend_name(module) when is_atom(module), do: module
 end

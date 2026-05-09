@@ -2,7 +2,24 @@
 
 A pluggable SFTP server for Elixir with support for S3 and custom backends.
 
+`Sftpd` wraps Erlang's `:ssh_sftpd` subsystem and lets you plug storage behind
+it through a small backend behaviour. It ships with:
+
+- an in-memory backend for development and tests
+- an S3 backend with range reads and multipart streaming writes
+- optional telemetry hooks around server lifecycle and SFTP operations
+
 ## Installation
+
+Version notes for this package:
+
+- verified minimum Elixir: `~> 1.14`
+- verified minimum OTP for CI: `26`
+- current pinned development environment: Erlang/OTP 28.5
+- current pinned development environment: Elixir 1.19.5 on OTP 28
+
+The package requirement is declared in `mix.exs`. The development environment
+is pinned in `.tool-versions`.
 
 ```elixir
 def deps do
@@ -26,6 +43,22 @@ end
 
 # Connect with: sftp -P 2222 dev@localhost
 ```
+
+## Guides
+
+- `GETTING_STARTED.md` for a step-by-step setup guide
+- `BACKENDS.md` for backend architecture and built-in backend tradeoffs
+- `CUSTOM_BACKENDS.md` for implementing your own backend
+- `TELEMETRY.md` for emitted events, metadata, and examples
+
+## Key Concepts
+
+- `Sftpd.start_server/1` starts an SSH daemon configured with an SFTP
+  file-handler
+- `Sftpd.Backend` defines the storage contract
+- `Sftpd.Backends.Memory` is the fastest local setup path
+- `Sftpd.Backends.S3` is the built-in persistent backend
+- `Sftpd.Telemetry` documents the optional instrumentation surface
 
 ## Backends
 
@@ -108,9 +141,33 @@ If you need to bound how long close-time finalization can block a session, pass
 `close_timeout: timeout_in_ms` to `Sftpd.start_server/1`. The default is
 `30_000`.
 
+## Telemetry
+
+`Sftpd` emits `:telemetry` events for server lifecycle and SFTP operations.
+Telemetry support is optional: if the `:telemetry` module is unavailable at
+runtime, event emission is skipped and the SFTP server continues normally.
+
+```elixir
+:telemetry.attach(
+  "sftpd-read-logger",
+  [:sftpd, :sftp, :read],
+  fn _event, measurements, metadata, _config ->
+    Logger.info(
+      "sftp read io_device=#{inspect(metadata.io_device)} bytes=#{measurements.bytes} result=#{metadata.result}"
+    )
+  end,
+  nil
+)
+```
+
+See the full telemetry event reference in `TELEMETRY.md` or
+`Sftpd.Telemetry`.
+
 ### Custom Backends
 
 Implement the `Sftpd.Backend` behaviour to create custom storage backends.
+See `BACKENDS.md` for backend overview and `CUSTOM_BACKENDS.md` for a full
+authoring guide.
 
 ## SSH Host Keys
 
